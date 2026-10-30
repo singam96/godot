@@ -30,9 +30,16 @@
 
 #include "hlod_cluster_3d.h"
 
+#include "core/config/engine.h"
+#include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "scene/3d/camera_3d.h"
+#include "scene/3d/hlod_material_atlas.h"
 #include "scene/main/scene_tree.h"
+#include "scene/main/viewport.h"
+#include "scene/resources/packed_scene.h"
 #include "scene/resources/surface_tool.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -168,6 +175,24 @@ void HLODCluster3D::_collect_meshes(LocalVector<MeshInstance3D *> &r_meshes) con
 	}
 }
 
+bool HLODCluster3D::_get_relative_transform(Node3D *p_node, Transform3D &r_xform) const {
+	// Computed from the local transforms so that it also works for scenes that are not inside the tree (e.g. while importing).
+	Transform3D xform;
+	Node *node = p_node;
+	while (node && node != this) {
+		Node3D *node_3d = Object::cast_to<Node3D>(node);
+		if (node_3d) {
+			if (!node_3d->is_visible() || node_3d->is_set_as_top_level()) {
+				return false;
+			}
+			xform = node_3d->get_transform() * xform;
+		}
+		node = node->get_parent();
+	}
+	r_xform = xform;
+	return node == this;
+}
+
 void HLODCluster3D::_update_proxy() {
 	proxy->set_mesh(proxy_mesh);
 	proxy->set_visibility_range_begin(switch_distance);
@@ -216,10 +241,21 @@ void HLODCluster3D::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_ENTER_TREE: {
 			_link_children();
+			set_process_internal(!detail_scene_path.is_empty() && !Engine::get_singleton()->is_editor_hint());
 		} break;
 
 		case NOTIFICATION_EXIT_TREE: {
 			_unlink_children();
+			set_process_internal(false);
+		} break;
+
+		case NOTIFICATION_INTERNAL_PROCESS: {
+			// Checking a few times per second is plenty, because the load margin gives the load time to finish.
+			stream_timer += get_process_delta_time();
+			if (stream_timer >= 0.2f) {
+				stream_timer = 0.0f;
+				update_streaming();
+			}
 		} break;
 
 		case NOTIFICATION_CHILD_ORDER_CHANGED: {
@@ -272,6 +308,50 @@ float HLODCluster3D::get_simplify_error() const {
 	return simplify_error;
 }
 
+void HLODCluster3D::set_merge_materials(bool p_enabled) {
+	merge_materials = p_enabled;
+}
+
+bool HLODCluster3D::get_merge_materials() const {
+	return merge_materials;
+}
+
+void HLODCluster3D::set_atlas_cell_size(int p_size) {
+	atlas_cell_size = CLAMP(p_size, 16, 2048);
+}
+
+int HLODCluster3D::get_atlas_cell_size() const {
+	return atlas_cell_size;
+}
+
+void HLODCluster3D::set_detail_scene_path(const String &p_path) {
+	detail_scene_path = p_path;
+	stream_state = STREAM_UNLOADED;
+	if (is_inside_tree()) {
+		set_process_internal(!detail_scene_path.is_empty() && !Engine::get_singleton()->is_editor_hint());
+	}
+}
+
+String HLODCluster3D::get_detail_scene_path() const {
+	return detail_scene_path;
+}
+
+void HLODCluster3D::set_stream_load_margin(float p_margin) {
+	stream_load_margin = MAX(p_margin, 0.0f);
+}
+
+float HLODCluster3D::get_stream_load_margin() const {
+	return stream_load_margin;
+}
+
+void HLODCluster3D::set_stream_unload_margin(float p_margin) {
+	stream_unload_margin = MAX(p_margin, 0.0f);
+}
+
+float HLODCluster3D::get_stream_unload_margin() const {
+	return stream_unload_margin;
+}
+
 void HLODCluster3D::set_proxy_mesh(const Ref<Mesh> &p_mesh) {
 	proxy_mesh = p_mesh;
 	_update_proxy();
@@ -284,53 +364,149 @@ Ref<Mesh> HLODCluster3D::get_proxy_mesh() const {
 }
 
 Error HLODCluster3D::generate_proxy() {
-	ERR_FAIL_COND_V_MSG(!is_inside_tree(), ERR_UNCONFIGURED, "HLODCluster3D must be inside the scene tree to generate its proxy mesh.");
 	const bool simplify = simplify_ratio < 1.0f;
 	ERR_FAIL_COND_V_MSG(simplify && SurfaceTool::simplify_func == nullptr, ERR_UNAVAILABLE, "Generating an HLOD proxy with simplify_ratio below 1.0 requires the meshoptimizer module.");
 
 	LocalVector<MeshInstance3D *> meshes;
 	_collect_meshes(meshes);
 
-	// Surfaces are merged per material to keep the draw call count of the proxy low.
-	struct Batch {
+	// Gather the surfaces to merge together with the material they are drawn with.
+	struct SourceSurface {
+		Ref<Mesh> mesh;
+		int surface = 0;
+		Transform3D xform;
 		Ref<Material> material;
-		Ref<SurfaceTool> tool;
+		bool uvs_in_range = true;
 	};
-	LocalVector<Batch> batches;
-
-	const Transform3D to_local = get_global_transform().affine_inverse();
+	LocalVector<SourceSurface> surfaces;
 	for (MeshInstance3D *mesh_instance : meshes) {
 		Ref<Mesh> mesh = mesh_instance->get_mesh();
-		if (mesh.is_null() || !mesh_instance->is_visible_in_tree()) {
+		Transform3D xform;
+		if (mesh.is_null() || !_get_relative_transform(mesh_instance, xform)) {
 			continue;
 		}
-		const Transform3D xform = to_local * mesh_instance->get_global_transform();
 		for (int surface = 0; surface < mesh->get_surface_count(); surface++) {
 			if (mesh->surface_get_primitive_type(surface) != Mesh::PRIMITIVE_TRIANGLES) {
 				continue;
 			}
-			Ref<Material> material = mesh_instance->get_material_override();
-			if (material.is_null()) {
-				material = mesh_instance->get_active_material(surface);
+			SourceSurface source;
+			source.mesh = mesh;
+			source.surface = surface;
+			source.xform = xform;
+			source.material = mesh_instance->get_material_override();
+			if (source.material.is_null()) {
+				source.material = mesh_instance->get_active_material(surface);
 			}
+			surfaces.push_back(source);
+		}
+	}
+	ERR_FAIL_COND_V_MSG(surfaces.is_empty(), ERR_DOES_NOT_EXIST, "HLODCluster3D has no visible MeshInstance3D descendants with triangle surfaces to merge.");
 
-			Batch *batch = nullptr;
-			for (Batch &candidate : batches) {
-				if (candidate.material == material) {
-					batch = &candidate;
+	// Bake groups of simple materials into texture atlases.
+	struct AtlasGroup {
+		String key;
+		Vector<Ref<StandardMaterial3D>> materials;
+		Ref<StandardMaterial3D> atlas_material;
+		Vector<Rect2> rects;
+	};
+	LocalVector<AtlasGroup> groups;
+	// For every surface, the atlas group (or -1) and the index of its material in that group.
+	LocalVector<Pair<int, int>> atlas_slots;
+	atlas_slots.resize(surfaces.size());
+	for (Pair<int, int> &slot : atlas_slots) {
+		slot = Pair<int, int>(-1, -1);
+	}
+	if (merge_materials) {
+		for (uint32_t i = 0; i < surfaces.size(); i++) {
+			const Ref<StandardMaterial3D> material = surfaces[i].material;
+			if (!HLODMaterialAtlas::is_eligible(material)) {
+				continue;
+			}
+			// Atlas UVs only work for surfaces whose UVs stay inside the 0..1 range.
+			const Array arrays = surfaces[i].mesh->surface_get_arrays(surfaces[i].surface);
+			const PackedVector2Array uvs = arrays[Mesh::ARRAY_TEX_UV];
+			bool in_range = true;
+			for (const Vector2 &uv : uvs) {
+				if (uv.x < -0.001f || uv.x > 1.001f || uv.y < -0.001f || uv.y > 1.001f) {
+					in_range = false;
 					break;
 				}
 			}
-			if (!batch) {
-				batches.push_back(Batch());
-				batch = &batches[batches.size() - 1];
-				batch->material = material;
-				batch->tool.instantiate();
+			if (!in_range || (uvs.is_empty() && material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid())) {
+				continue;
 			}
-			batch->tool->append_from(mesh, surface, xform);
+
+			const String key = HLODMaterialAtlas::get_group_key(material);
+			int group_index = -1;
+			for (uint32_t g = 0; g < groups.size(); g++) {
+				if (groups[g].key == key) {
+					group_index = g;
+					break;
+				}
+			}
+			if (group_index < 0) {
+				AtlasGroup group;
+				group.key = key;
+				groups.push_back(group);
+				group_index = groups.size() - 1;
+			}
+			AtlasGroup &group = groups[group_index];
+			int material_index = group.materials.find(material);
+			if (material_index < 0) {
+				group.materials.push_back(material);
+				material_index = group.materials.size() - 1;
+			}
+			atlas_slots[i] = Pair<int, int>(group_index, material_index);
+		}
+		for (AtlasGroup &group : groups) {
+			// A single material gains nothing from an atlas.
+			if (group.materials.size() > 1) {
+				group.atlas_material = HLODMaterialAtlas::build(group.materials, atlas_cell_size, group.rects);
+			}
 		}
 	}
-	ERR_FAIL_COND_V_MSG(batches.is_empty(), ERR_DOES_NOT_EXIST, "HLODCluster3D has no visible MeshInstance3D descendants with triangle surfaces to merge.");
+
+	// Surfaces are merged per material (or per atlas) to keep the draw call count of the proxy low.
+	struct Batch {
+		Ref<Material> material;
+		int atlas_group = -1;
+		Ref<SurfaceTool> tool;
+	};
+	LocalVector<Batch> batches;
+	for (uint32_t i = 0; i < surfaces.size(); i++) {
+		const SourceSurface &source = surfaces[i];
+		const int group_index = atlas_slots[i].first;
+		const bool atlased = group_index >= 0 && groups[group_index].atlas_material.is_valid();
+
+		Batch *batch = nullptr;
+		for (Batch &candidate : batches) {
+			if (atlased ? candidate.atlas_group == group_index : (candidate.atlas_group < 0 && candidate.material == source.material)) {
+				batch = &candidate;
+				break;
+			}
+		}
+		if (!batch) {
+			batches.push_back(Batch());
+			batch = &batches[batches.size() - 1];
+			batch->atlas_group = atlased ? group_index : -1;
+			batch->material = atlased ? Ref<Material>(groups[group_index].atlas_material) : source.material;
+			batch->tool.instantiate();
+			batch->tool->begin(Mesh::PRIMITIVE_TRIANGLES);
+		}
+
+		const uint32_t first_vertex = batch->tool->get_vertex_array().size();
+		batch->tool->append_from(source.mesh, source.surface, source.xform);
+		if (atlased) {
+			const Rect2 rect = groups[group_index].rects[atlas_slots[i].second];
+			// Make sure the UV attribute exists even when the source surface has none (solid color materials).
+			batch->tool->set_uv(Vector2());
+			LocalVector<SurfaceTool::Vertex> &vertices = batch->tool->get_vertex_array();
+			const bool has_uvs = (uint64_t)source.mesh->surface_get_format(source.surface) & Mesh::ARRAY_FORMAT_TEX_UV;
+			for (uint32_t v = first_vertex; v < vertices.size(); v++) {
+				vertices[v].uv = rect.position + (has_uvs ? vertices[v].uv * rect.size : rect.size * 0.5f);
+			}
+		}
+	}
 
 	Ref<ArrayMesh> result;
 	result.instantiate();
@@ -350,7 +526,6 @@ Error HLODCluster3D::generate_proxy() {
 
 Error HLODCluster3D::build_grid(float p_cell_size) {
 	ERR_FAIL_COND_V_MSG(p_cell_size <= 0.0f, ERR_INVALID_PARAMETER, "The grid cell size must be greater than zero.");
-	ERR_FAIL_COND_V_MSG(!is_inside_tree(), ERR_UNCONFIGURED, "HLODCluster3D must be inside the scene tree to build a grid.");
 
 	// Sort the direct 3D children into grid cells by their position.
 	HashMap<Vector3i, LocalVector<Node3D *>> cells;
@@ -370,6 +545,8 @@ Error HLODCluster3D::build_grid(float p_cell_size) {
 	ERR_FAIL_COND_V_MSG(cells.is_empty(), ERR_DOES_NOT_EXIST, "HLODCluster3D has no 3D children to group into a grid.");
 
 	for (const Vector3i &cell : cell_order) {
+		const Vector3 center = (Vector3(cell) + Vector3(0.5f, 0.5f, 0.5f)) * p_cell_size;
+
 		HLODCluster3D *cell_cluster = memnew(HLODCluster3D);
 		cell_cluster->set_name(vformat("Cell_%d_%d_%d", cell.x, cell.y, cell.z));
 		cell_cluster->set_switch_distance(switch_distance * 0.5f);
@@ -377,16 +554,23 @@ Error HLODCluster3D::build_grid(float p_cell_size) {
 		cell_cluster->set_fade_mode(fade_mode);
 		cell_cluster->set_simplify_ratio(simplify_ratio);
 		cell_cluster->set_simplify_error(simplify_error);
+		cell_cluster->set_merge_materials(merge_materials);
+		cell_cluster->set_atlas_cell_size(atlas_cell_size);
+		cell_cluster->set_position(center);
 		add_child(cell_cluster, true);
-		if (get_owner()) {
-			cell_cluster->set_owner(get_owner());
-		} else if (is_inside_tree() && get_tree()->get_edited_scene_root() == this) {
-			cell_cluster->set_owner(this);
+		Node *scene_owner = get_owner();
+		if (!scene_owner && is_inside_tree() && get_tree()->get_edited_scene_root() == this) {
+			scene_owner = this;
 		}
-		cell_cluster->set_global_position(to_global((Vector3(cell) + Vector3(0.5f, 0.5f, 0.5f)) * p_cell_size));
+		if (scene_owner) {
+			cell_cluster->set_owner(scene_owner);
+		}
 
+		// The cell is a pure translation, so the objects keep their place by subtracting its offset.
 		for (Node3D *child : cells[cell]) {
-			child->reparent(cell_cluster, true);
+			const Vector3 position = child->get_position();
+			child->reparent(cell_cluster, false);
+			child->set_position(position - center);
 		}
 
 		const Error err = cell_cluster->generate_proxy();
@@ -396,6 +580,129 @@ Error HLODCluster3D::build_grid(float p_cell_size) {
 	}
 
 	return generate_proxy();
+}
+
+Error HLODCluster3D::store_detail_scene(const String &p_path) {
+	ERR_FAIL_COND_V_MSG(p_path.is_empty(), ERR_INVALID_PARAMETER, "The detail scene path must not be empty.");
+	if (proxy_mesh.is_null()) {
+		const Error err = generate_proxy();
+		if (err != OK) {
+			return err;
+		}
+	}
+
+	Node *scene_owner = get_owner() ? get_owner() : this;
+
+	// Move the content below this node into a holder that becomes the root of the stored scene.
+	Node3D *holder = memnew(Node3D);
+	holder->set_name("Detail");
+	struct Moved {
+		Node *node = nullptr;
+		LocalVector<Node *> owned;
+	};
+	LocalVector<Moved> moved;
+	while (get_child_count(false) > 0) {
+		Moved entry;
+		entry.node = get_child(0, false);
+		LocalVector<Node *> to_visit;
+		to_visit.push_back(entry.node);
+		while (!to_visit.is_empty()) {
+			Node *node = to_visit[to_visit.size() - 1];
+			to_visit.resize(to_visit.size() - 1);
+			if (node == entry.node || node->get_owner() == scene_owner || !node->get_owner()) {
+				entry.owned.push_back(node);
+			}
+			for (int i = 0; i < node->get_child_count(false); i++) {
+				to_visit.push_back(node->get_child(i, false));
+			}
+		}
+		remove_child(entry.node);
+		holder->add_child(entry.node);
+		for (Node *node : entry.owned) {
+			node->set_owner(holder);
+		}
+		moved.push_back(entry);
+	}
+
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	Error err = packed->pack(holder);
+	if (err == OK) {
+		err = ResourceSaver::save(packed, p_path);
+	}
+
+	if (err != OK) {
+		// Put everything back where it was.
+		for (Moved &entry : moved) {
+			holder->remove_child(entry.node);
+			add_child(entry.node);
+			for (Node *node : entry.owned) {
+				node->set_owner(scene_owner == this ? nullptr : scene_owner);
+			}
+		}
+		memdelete(holder);
+		return err;
+	}
+
+	memdelete(holder);
+	set_detail_scene_path(p_path);
+	return OK;
+}
+
+void HLODCluster3D::update_streaming() {
+	if (detail_scene_path.is_empty() || !is_inside_tree() || Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	Viewport *viewport = get_viewport();
+	Camera3D *camera = viewport ? viewport->get_camera_3d() : nullptr;
+	if (!camera) {
+		return;
+	}
+	const float distance = camera->get_global_position().distance_to(get_global_position());
+	const float detail_distance = switch_distance + switch_margin;
+
+	switch (stream_state) {
+		case STREAM_UNLOADED: {
+			if (distance < detail_distance + stream_load_margin) {
+				if (ResourceLoader::load_threaded_request(detail_scene_path, "PackedScene") == OK) {
+					stream_state = STREAM_LOADING;
+				} else {
+					ERR_PRINT(vformat("HLODCluster3D could not start loading the detail scene '%s'.", detail_scene_path));
+					stream_state = STREAM_FAILED;
+				}
+			}
+		} break;
+		case STREAM_LOADING: {
+			const ResourceLoader::ThreadLoadStatus status = ResourceLoader::load_threaded_get_status(detail_scene_path);
+			if (status == ResourceLoader::THREAD_LOAD_LOADED) {
+				Ref<PackedScene> packed = ResourceLoader::load_threaded_get(detail_scene_path);
+				Node *detail = packed.is_valid() ? packed->instantiate() : nullptr;
+				if (detail) {
+					add_child(detail);
+					detail_id = detail->get_instance_id();
+					stream_state = STREAM_LOADED;
+				} else {
+					ERR_PRINT(vformat("HLODCluster3D could not instantiate the detail scene '%s'.", detail_scene_path));
+					stream_state = STREAM_FAILED;
+				}
+			} else if (status == ResourceLoader::THREAD_LOAD_FAILED || status == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE) {
+				ERR_PRINT(vformat("HLODCluster3D failed to load the detail scene '%s'.", detail_scene_path));
+				stream_state = STREAM_FAILED;
+			}
+		} break;
+		case STREAM_LOADED: {
+			if (distance > detail_distance + stream_unload_margin) {
+				Node *detail = Object::cast_to<Node>(ObjectDB::get_instance(detail_id));
+				if (detail) {
+					detail->queue_free();
+				}
+				detail_id = ObjectID();
+				stream_state = STREAM_UNLOADED;
+			}
+		} break;
+		case STREAM_FAILED: {
+		} break;
+	}
 }
 
 void HLODCluster3D::clear_proxy() {
@@ -428,11 +735,23 @@ void HLODCluster3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_simplify_ratio"), &HLODCluster3D::get_simplify_ratio);
 	ClassDB::bind_method(D_METHOD("set_simplify_error", "error"), &HLODCluster3D::set_simplify_error);
 	ClassDB::bind_method(D_METHOD("get_simplify_error"), &HLODCluster3D::get_simplify_error);
+	ClassDB::bind_method(D_METHOD("set_merge_materials", "enabled"), &HLODCluster3D::set_merge_materials);
+	ClassDB::bind_method(D_METHOD("get_merge_materials"), &HLODCluster3D::get_merge_materials);
+	ClassDB::bind_method(D_METHOD("set_atlas_cell_size", "size"), &HLODCluster3D::set_atlas_cell_size);
+	ClassDB::bind_method(D_METHOD("get_atlas_cell_size"), &HLODCluster3D::get_atlas_cell_size);
+	ClassDB::bind_method(D_METHOD("set_detail_scene_path", "path"), &HLODCluster3D::set_detail_scene_path);
+	ClassDB::bind_method(D_METHOD("get_detail_scene_path"), &HLODCluster3D::get_detail_scene_path);
+	ClassDB::bind_method(D_METHOD("set_stream_load_margin", "margin"), &HLODCluster3D::set_stream_load_margin);
+	ClassDB::bind_method(D_METHOD("get_stream_load_margin"), &HLODCluster3D::get_stream_load_margin);
+	ClassDB::bind_method(D_METHOD("set_stream_unload_margin", "margin"), &HLODCluster3D::set_stream_unload_margin);
+	ClassDB::bind_method(D_METHOD("get_stream_unload_margin"), &HLODCluster3D::get_stream_unload_margin);
 	ClassDB::bind_method(D_METHOD("set_proxy_mesh", "mesh"), &HLODCluster3D::set_proxy_mesh);
 	ClassDB::bind_method(D_METHOD("get_proxy_mesh"), &HLODCluster3D::get_proxy_mesh);
 
 	ClassDB::bind_method(D_METHOD("generate_proxy"), &HLODCluster3D::generate_proxy);
 	ClassDB::bind_method(D_METHOD("build_grid", "cell_size"), &HLODCluster3D::build_grid);
+	ClassDB::bind_method(D_METHOD("store_detail_scene", "path"), &HLODCluster3D::store_detail_scene);
+	ClassDB::bind_method(D_METHOD("update_streaming"), &HLODCluster3D::update_streaming);
 	ClassDB::bind_method(D_METHOD("clear_proxy"), &HLODCluster3D::clear_proxy);
 	ClassDB::bind_method(D_METHOD("update_children"), &HLODCluster3D::update_children);
 
@@ -441,7 +760,14 @@ void HLODCluster3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "fade_mode", PROPERTY_HINT_ENUM, "Disabled,Self,Dependencies"), "set_fade_mode", "get_fade_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simplify_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_simplify_ratio", "get_simplify_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simplify_error", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_simplify_error", "get_simplify_error");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "merge_materials"), "set_merge_materials", "get_merge_materials");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "atlas_cell_size", PROPERTY_HINT_RANGE, "16,2048,1,suffix:px"), "set_atlas_cell_size", "get_atlas_cell_size");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "proxy_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_proxy_mesh", "get_proxy_mesh");
+
+	ADD_GROUP("Streaming", "");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "detail_scene_path", PROPERTY_HINT_FILE, "*.tscn,*.scn"), "set_detail_scene_path", "get_detail_scene_path");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "stream_load_margin", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), "set_stream_load_margin", "get_stream_load_margin");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "stream_unload_margin", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), "set_stream_unload_margin", "get_stream_unload_margin");
 }
 
 HLODCluster3D::HLODCluster3D() {

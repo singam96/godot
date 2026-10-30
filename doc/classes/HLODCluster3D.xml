@@ -11,7 +11,9 @@
 		[b]Note:[/b] Descendants that already have [member Node3D.visibility_parent] set are left untouched and are not hidden by the cluster.
 		[b]Hierarchy:[/b] [HLODCluster3D] nodes can be nested to build several levels of detail, for example a district made of several streets. The proxy of the outer cluster merges all meshes below it, including those inside nested clusters. When the camera is close enough to the outer cluster, the outer proxy is hidden and each nested cluster takes over with its own [member switch_distance]. Nested clusters should use a smaller [member switch_distance] than the cluster that contains them.
 		In the editor, selecting an [HLODCluster3D] adds a [b]Generate HLOD[/b] button to the toolbar of the 3D editor, which calls [method generate_proxy] and supports undo.
-		[b]Note:[/b] The proxy does not use texture atlases. Surfaces with different materials stay separate surfaces of the proxy mesh.
+		[b]Material atlas:[/b] If [member merge_materials] is enabled, simple opaque [StandardMaterial3D]s are baked into a shared texture atlas so that objects with different materials can be drawn in a single draw call. Only the albedo color and albedo texture are baked. Materials that use other features (transparency, normal maps, emission, etc.), tiled UVs or other settings that differ (roughness, culling, shading mode, etc.) keep their own surface.
+		[b]Streaming:[/b] For very large scenes, the detailed geometry can be stored in a separate scene with [method store_detail_scene]. At run-time, the scene is then loaded in a background thread when the camera gets close and freed when it moves away, while the lightweight [member proxy_mesh] is always available. Streaming is disabled in the editor.
+		[b]Importing:[/b] The scene import options include an [b]HLOD[/b] section that turns the root node into an [HLODCluster3D] and generates the proxy during import.
 	</description>
 	<tutorials>
 	</tutorials>
@@ -21,7 +23,7 @@
 			<param index="0" name="cell_size" type="float" />
 			<description>
 				Automatically builds a hierarchy of detail levels for a large number of objects. The direct [Node3D] children of this cluster are sorted into a grid with cells of [param cell_size] meters and moved into one nested [HLODCluster3D] per occupied cell, keeping their global transform. Each nested cluster uses half of this cluster's [member switch_distance] and [member switch_margin] and the same simplification settings. A proxy is then generated for every cell and for this cluster.
-				Returns [constant OK] on success, [constant ERR_INVALID_PARAMETER] if [param cell_size] is not positive, [constant ERR_UNCONFIGURED] if the cluster is not inside the scene tree and [constant ERR_DOES_NOT_EXIST] if there are no children to group.
+				Returns [constant OK] on success, [constant ERR_INVALID_PARAMETER] if [param cell_size] is not positive and [constant ERR_DOES_NOT_EXIST] if there are no children to group.
 				[b]Note:[/b] This reorganizes the node tree and cannot be undone with the editor's undo history. It is intended to be called once from a tool script. Choose a [param cell_size] smaller than this cluster's [member switch_distance].
 			</description>
 		</method>
@@ -35,7 +37,16 @@
 			<return type="int" enum="Error" />
 			<description>
 				Merges the visible [MeshInstance3D] descendants into a new [member proxy_mesh], simplifying it according to [member simplify_ratio] and [member simplify_error]. Returns [constant OK] on success.
-				Returns [constant ERR_UNCONFIGURED] if the cluster is not inside the scene tree, [constant ERR_DOES_NOT_EXIST] if there is no geometry to merge, and [constant ERR_UNAVAILABLE] if simplification is requested but the meshoptimizer module is not available.
+				Returns [constant ERR_DOES_NOT_EXIST] if there is no geometry to merge, and [constant ERR_UNAVAILABLE] if simplification is requested but the meshoptimizer module is not available. This also works when the cluster is not inside the scene tree.
+			</description>
+		</method>
+		<method name="store_detail_scene">
+			<return type="int" enum="Error" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Moves the children of this cluster into a new scene saved at [param path] (a [code].tscn[/code] or [code].scn[/code] file) and sets [member detail_scene_path] to it. If there is no [member proxy_mesh] yet, one is generated first, so the cluster keeps rendering something while the detail scene is not loaded.
+				The stored scene has a [Node3D] root named [code]Detail[/code], which is instantiated as a child of this cluster when it is streamed in. To edit the detailed geometry later, open the stored scene.
+				Returns [constant OK] on success, otherwise the error of the failed step. If saving fails, the children are put back.
 			</description>
 		</method>
 		<method name="update_children">
@@ -44,10 +55,25 @@
 				Re-links the descendants of this cluster to the proxy. This happens automatically when direct children are added or removed. Call it manually after reparenting nodes deeper in the hierarchy.
 			</description>
 		</method>
+		<method name="update_streaming">
+			<return type="void" />
+			<description>
+				Checks the distance of the current [Camera3D] and starts loading or frees the detail scene if needed. This is called automatically several times per second while [member detail_scene_path] is set, and does nothing in the editor. It can be called manually to force an immediate check.
+			</description>
+		</method>
 	</methods>
 	<members>
+		<member name="atlas_cell_size" type="int" setter="set_atlas_cell_size" getter="get_atlas_cell_size" default="128">
+			The size in pixels of the square that every material gets in the texture atlas created by [method generate_proxy]. It is reduced automatically if the atlas would become too large. Only used if [member merge_materials] is [code]true[/code].
+		</member>
+		<member name="detail_scene_path" type="String" setter="set_detail_scene_path" getter="get_detail_scene_path" default="&quot;&quot;">
+			The path of the scene with the detailed geometry that is streamed in when the camera is close, see [method store_detail_scene]. If empty, the children of this cluster are always part of the scene and no streaming happens.
+		</member>
 		<member name="fade_mode" type="int" setter="set_fade_mode" getter="get_fade_mode" enum="GeometryInstance3D.VisibilityRangeFadeMode" default="0">
 			Controls how the transition between the proxy and the descendants is faded. See [enum GeometryInstance3D.VisibilityRangeFadeMode]. Fading is only supported by the Forward+ renderer.
+		</member>
+		<member name="merge_materials" type="bool" setter="set_merge_materials" getter="get_merge_materials" default="true">
+			If [code]true[/code], simple materials are baked into a shared texture atlas when generating the proxy, so that different materials can be merged into one surface. See the description for the limitations.
 		</member>
 		<member name="proxy_mesh" type="Mesh" setter="set_proxy_mesh" getter="get_proxy_mesh">
 			The simplified mesh drawn at a distance. It is expressed in the local space of this node. Assign it manually or create it with [method generate_proxy].
@@ -57,6 +83,12 @@
 		</member>
 		<member name="simplify_ratio" type="float" setter="set_simplify_ratio" getter="get_simplify_ratio" default="0.25">
 			The fraction of the original triangle count that [method generate_proxy] tries to keep. [code]1.0[/code] merges the meshes without simplifying them.
+		</member>
+		<member name="stream_load_margin" type="float" setter="set_stream_load_margin" getter="get_stream_load_margin" default="25.0">
+			How far outside of [member switch_distance] (in meters) the camera must be before the detail scene starts loading. Increase it if the loading takes longer than the camera needs to reach the switch distance.
+		</member>
+		<member name="stream_unload_margin" type="float" setter="set_stream_unload_margin" getter="get_stream_unload_margin" default="50.0">
+			How far outside of [member switch_distance] (in meters) the camera must be before the loaded detail scene is freed. Keep it larger than [member stream_load_margin] to avoid loading and unloading repeatedly.
 		</member>
 		<member name="switch_distance" type="float" setter="set_switch_distance" getter="get_switch_distance" default="50.0">
 			The distance from the camera, in meters, at which the proxy replaces the descendants.
