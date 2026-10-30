@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="HLODCluster3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Replaces a group of 3D meshes with a single simplified proxy mesh when viewed from far away (hierarchical level of detail).
+	</brief_description>
+	<description>
+		[HLODCluster3D] merges all [MeshInstance3D] descendants into one simplified [member proxy_mesh]. When the camera is farther than [member switch_distance] from the cluster, the proxy is drawn and the original descendants are hidden. When the camera is closer, the proxy is hidden and the descendants are drawn. This reduces both the draw call count and the triangle count of distant groups of objects, such as a village or a forest clearing.
+		The switch is built on top of [member GeometryInstance3D.visibility_range_begin] and the visibility parent system ([member Node3D.visibility_parent]). The proxy and all descendants switch together based on the distance to the cluster's origin, so place the cluster's origin near the center of the objects it groups.
+		To use it, add the meshes you want to group as descendants of an [HLODCluster3D], then call [method generate_proxy] (for example from a tool script or the editor). The generated [member proxy_mesh] is stored with the scene. Surfaces that share a material are merged into a single surface of the proxy.
+		[b]Note:[/b] Simplification requires the meshoptimizer module. If it is unavailable, [method generate_proxy] fails unless [member simplify_ratio] is [code]1.0[/code].
+		[b]Note:[/b] Descendants that already have [member Node3D.visibility_parent] set are left untouched and are not hidden by the cluster. Nested [HLODCluster3D] nodes are not merged into their parent cluster.
+		[b]Note:[/b] The proxy does not use texture atlases. Surfaces with different materials stay separate surfaces of the proxy mesh.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear_proxy">
+			<return type="void" />
+			<description>
+				Removes the [member proxy_mesh]. The descendants are then always drawn according to their own visibility settings.
+			</description>
+		</method>
+		<method name="generate_proxy">
+			<return type="int" enum="Error" />
+			<description>
+				Merges the visible [MeshInstance3D] descendants into a new [member proxy_mesh], simplifying it according to [member simplify_ratio] and [member simplify_error]. Returns [constant OK] on success.
+				Returns [constant ERR_UNCONFIGURED] if the cluster is not inside the scene tree, [constant ERR_DOES_NOT_EXIST] if there is no geometry to merge, and [constant ERR_UNAVAILABLE] if simplification is requested but the meshoptimizer module is not available.
+			</description>
+		</method>
+		<method name="update_children">
+			<return type="void" />
+			<description>
+				Re-links the descendants of this cluster to the proxy. This happens automatically when direct children are added or removed. Call it manually after reparenting nodes deeper in the hierarchy.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="fade_mode" type="int" setter="set_fade_mode" getter="get_fade_mode" enum="GeometryInstance3D.VisibilityRangeFadeMode" default="0">
+			Controls how the transition between the proxy and the descendants is faded. See [enum GeometryInstance3D.VisibilityRangeFadeMode]. Fading is only supported by the Forward+ renderer.
+		</member>
+		<member name="proxy_mesh" type="Mesh" setter="set_proxy_mesh" getter="get_proxy_mesh">
+			The simplified mesh drawn at a distance. It is expressed in the local space of this node. Assign it manually or create it with [method generate_proxy].
+		</member>
+		<member name="simplify_error" type="float" setter="set_simplify_error" getter="get_simplify_error" default="0.1">
+			The maximum error allowed during simplification, relative to the size of the merged geometry. Simplification stops early if reaching [member simplify_ratio] would exceed this error.
+		</member>
+		<member name="simplify_ratio" type="float" setter="set_simplify_ratio" getter="get_simplify_ratio" default="0.25">
+			The fraction of the original triangle count that [method generate_proxy] tries to keep. [code]1.0[/code] merges the meshes without simplifying them.
+		</member>
+		<member name="switch_distance" type="float" setter="set_switch_distance" getter="get_switch_distance" default="50.0">
+			The distance from the camera, in meters, at which the proxy replaces the descendants.
+		</member>
+		<member name="switch_margin" type="float" setter="set_switch_margin" getter="get_switch_margin" default="5.0">
+			The margin around [member switch_distance], in meters. Without fading it acts as hysteresis, which prevents the cluster from flickering when the camera hovers around the switch distance. With fading, it is the width of the transition.
+		</member>
+	</members>
+</class>
