@@ -70,7 +70,8 @@
 			The path of the scene with the detailed geometry that is streamed in when the camera is close, see [method store_detail_scene]. If empty, the children of this cluster are always part of the scene and no streaming happens.
 		</member>
 		<member name="fade_mode" type="int" setter="set_fade_mode" getter="get_fade_mode" enum="GeometryInstance3D.VisibilityRangeFadeMode" default="0">
-			Controls how the transition between the proxy and the descendants is faded. See [enum GeometryInstance3D.VisibilityRangeFadeMode]. Fading is only supported by the Forward+ renderer.
+			Controls how the transition between the proxy and the descendants is faded. See [enum GeometryInstance3D.VisibilityRangeFadeMode]. Fading is only supported by the Forward+ renderer, and the width of the transition is set by [member switch_margin].
+			[constant GeometryInstance3D.VISIBILITY_RANGE_FADE_DEPENDENCIES] cross-fades the proxy and the descendants and is the right choice for a smooth transition. [constant GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF] only fades the proxy, which usually lies inside the original geometry and is hidden by it, so the descendants still disappear abruptly at the end of the transition.
 		</member>
 		<member name="merge_materials" type="bool" setter="set_merge_materials" getter="get_merge_materials" default="true">
 			If [code]true[/code], simple materials are baked into a shared texture atlas when generating the proxy, so that different materials can be merged into one surface. See the description for the limitations.
