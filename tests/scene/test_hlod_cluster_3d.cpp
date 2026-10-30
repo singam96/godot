@@ -382,6 +382,39 @@ TEST_CASE("[SceneTree][HLODCluster3D] Streaming the detail scene") {
 	memdelete(camera);
 }
 
+TEST_CASE("[SceneTree][HLODCluster3D] Grid cells of a scene root keep the scene ownership") {
+	// This is the situation while importing: the cluster is the root of a scene that is not in the tree.
+	HLODCluster3D *root = memnew(HLODCluster3D);
+	root->set_simplify_ratio(1.0f);
+	MeshInstance3D *first = _add_sphere(root, Vector3(1, 0, 1));
+	MeshInstance3D *second = _add_sphere(root, Vector3(30, 0, 1));
+	first->set_owner(root);
+	second->set_owner(root);
+
+	REQUIRE(root->build_grid(20.0f) == OK);
+	REQUIRE(root->get_child_count(false) == 2);
+	for (int i = 0; i < root->get_child_count(false); i++) {
+		Node *cell = root->get_child(i, false);
+		CHECK(cell->get_owner() == root);
+		REQUIRE(cell->get_child_count(false) == 1);
+		CHECK(cell->get_child(0, false)->get_owner() == root);
+	}
+	// Objects keep their place relative to the root: the position of the cell plus their own offset.
+	CHECK((first->get_parent_node_3d()->get_position() + first->get_position()).is_equal_approx(Vector3(1, 0, 1)));
+	CHECK((second->get_parent_node_3d()->get_position() + second->get_position()).is_equal_approx(Vector3(30, 0, 1)));
+
+	// The result can be packed as a scene, which only keeps the nodes owned by the root.
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	Node *instance = packed->instantiate();
+	REQUIRE(instance != nullptr);
+	CHECK(instance->get_child_count(false) == 2);
+	memdelete(instance);
+
+	memdelete(root);
+}
+
 TEST_CASE("[SceneTree][HLODCluster3D] Generating without geometry fails") {
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	SceneTree::get_singleton()->get_root()->add_child(cluster);

@@ -62,6 +62,35 @@ T _compact_array(const T &p_src, const LocalVector<uint32_t> &p_order, uint32_t 
 	return dst;
 }
 
+// Moves a node below a new parent while keeping the nodes that belong to the same scene owner. Unsetting the owner
+// during the move avoids the warning about temporarily inconsistent ownership that Node::reparent() causes.
+void _move_node_keeping_owner(Node *p_node, Node *p_new_parent) {
+	Node *owner = p_node->get_owner();
+	LocalVector<Node *> owned;
+	if (owner) {
+		LocalVector<Node *> to_visit;
+		to_visit.push_back(p_node);
+		while (!to_visit.is_empty()) {
+			Node *node = to_visit[to_visit.size() - 1];
+			to_visit.resize(to_visit.size() - 1);
+			if (node->get_owner() == owner) {
+				owned.push_back(node);
+			}
+			for (int i = 0; i < node->get_child_count(false); i++) {
+				to_visit.push_back(node->get_child(i, false));
+			}
+		}
+		for (Node *node : owned) {
+			node->set_owner(nullptr);
+		}
+	}
+	p_node->get_parent()->remove_child(p_node);
+	p_new_parent->add_child(p_node);
+	for (Node *node : owned) {
+		node->set_owner(owner);
+	}
+}
+
 void _simplify_surface_arrays(Array &r_arrays, float p_ratio, float p_error) {
 	const PackedVector3Array vertices = r_arrays[Mesh::ARRAY_VERTEX];
 	const PackedInt32Array indices = r_arrays[Mesh::ARRAY_INDEX];
@@ -558,8 +587,9 @@ Error HLODCluster3D::build_grid(float p_cell_size) {
 		cell_cluster->set_atlas_cell_size(atlas_cell_size);
 		cell_cluster->set_position(center);
 		add_child(cell_cluster, true);
+		// A cluster that is the root of its own scene (e.g. while importing) owns the nodes below it.
 		Node *scene_owner = get_owner();
-		if (!scene_owner && is_inside_tree() && get_tree()->get_edited_scene_root() == this) {
+		if (!scene_owner && (!get_parent() || (is_inside_tree() && get_tree()->get_edited_scene_root() == this))) {
 			scene_owner = this;
 		}
 		if (scene_owner) {
@@ -569,7 +599,7 @@ Error HLODCluster3D::build_grid(float p_cell_size) {
 		// The cell is a pure translation, so the objects keep their place by subtracting its offset.
 		for (Node3D *child : cells[cell]) {
 			const Vector3 position = child->get_position();
-			child->reparent(cell_cluster, false);
+			_move_node_keeping_owner(child, cell_cluster);
 			child->set_position(position - center);
 		}
 
