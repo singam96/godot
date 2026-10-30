@@ -16,6 +16,15 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="build_grid">
+			<return type="int" enum="Error" />
+			<param index="0" name="cell_size" type="float" />
+			<description>
+				Automatically builds a hierarchy of detail levels for a large number of objects. The direct [Node3D] children of this cluster are sorted into a grid with cells of [param cell_size] meters and moved into one nested [HLODCluster3D] per occupied cell, keeping their global transform. Each nested cluster uses half of this cluster's [member switch_distance] and [member switch_margin] and the same simplification settings. A proxy is then generated for every cell and for this cluster.
+				Returns [constant OK] on success, [constant ERR_INVALID_PARAMETER] if [param cell_size] is not positive, [constant ERR_UNCONFIGURED] if the cluster is not inside the scene tree and [constant ERR_DOES_NOT_EXIST] if there are no children to group.
+				[b]Note:[/b] This reorganizes the node tree and cannot be undone with the editor's undo history. It is intended to be called once from a tool script. Choose a [param cell_size] smaller than this cluster's [member switch_distance].
+			</description>
+		</method>
 		<method name="clear_proxy">
 			<return type="void" />
 			<description>

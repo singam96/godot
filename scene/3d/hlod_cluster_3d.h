@@ -85,6 +85,7 @@ public:
 	Ref<Mesh> get_proxy_mesh() const;
 
 	Error generate_proxy();
+	Error build_grid(float p_cell_size);
 	void clear_proxy();
 	void update_children();
 

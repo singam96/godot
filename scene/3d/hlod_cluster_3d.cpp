@@ -32,6 +32,7 @@
 
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "scene/main/scene_tree.h"
 #include "scene/resources/surface_tool.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -347,6 +348,56 @@ Error HLODCluster3D::generate_proxy() {
 	return OK;
 }
 
+Error HLODCluster3D::build_grid(float p_cell_size) {
+	ERR_FAIL_COND_V_MSG(p_cell_size <= 0.0f, ERR_INVALID_PARAMETER, "The grid cell size must be greater than zero.");
+	ERR_FAIL_COND_V_MSG(!is_inside_tree(), ERR_UNCONFIGURED, "HLODCluster3D must be inside the scene tree to build a grid.");
+
+	// Sort the direct 3D children into grid cells by their position.
+	HashMap<Vector3i, LocalVector<Node3D *>> cells;
+	LocalVector<Vector3i> cell_order;
+	for (int i = 0; i < get_child_count(false); i++) {
+		Node3D *child = Object::cast_to<Node3D>(get_child(i, false));
+		if (!child) {
+			continue;
+		}
+		const Vector3 position = child->get_position() / p_cell_size;
+		const Vector3i cell(Math::floor(position.x), Math::floor(position.y), Math::floor(position.z));
+		if (!cells.has(cell)) {
+			cell_order.push_back(cell);
+		}
+		cells[cell].push_back(child);
+	}
+	ERR_FAIL_COND_V_MSG(cells.is_empty(), ERR_DOES_NOT_EXIST, "HLODCluster3D has no 3D children to group into a grid.");
+
+	for (const Vector3i &cell : cell_order) {
+		HLODCluster3D *cell_cluster = memnew(HLODCluster3D);
+		cell_cluster->set_name(vformat("Cell_%d_%d_%d", cell.x, cell.y, cell.z));
+		cell_cluster->set_switch_distance(switch_distance * 0.5f);
+		cell_cluster->set_switch_margin(switch_margin * 0.5f);
+		cell_cluster->set_fade_mode(fade_mode);
+		cell_cluster->set_simplify_ratio(simplify_ratio);
+		cell_cluster->set_simplify_error(simplify_error);
+		add_child(cell_cluster, true);
+		if (get_owner()) {
+			cell_cluster->set_owner(get_owner());
+		} else if (is_inside_tree() && get_tree()->get_edited_scene_root() == this) {
+			cell_cluster->set_owner(this);
+		}
+		cell_cluster->set_global_position(to_global((Vector3(cell) + Vector3(0.5f, 0.5f, 0.5f)) * p_cell_size));
+
+		for (Node3D *child : cells[cell]) {
+			child->reparent(cell_cluster, true);
+		}
+
+		const Error err = cell_cluster->generate_proxy();
+		if (err != OK) {
+			return err;
+		}
+	}
+
+	return generate_proxy();
+}
+
 void HLODCluster3D::clear_proxy() {
 	set_proxy_mesh(Ref<Mesh>());
 }
@@ -381,6 +432,7 @@ void HLODCluster3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_proxy_mesh"), &HLODCluster3D::get_proxy_mesh);
 
 	ClassDB::bind_method(D_METHOD("generate_proxy"), &HLODCluster3D::generate_proxy);
+	ClassDB::bind_method(D_METHOD("build_grid", "cell_size"), &HLODCluster3D::build_grid);
 	ClassDB::bind_method(D_METHOD("clear_proxy"), &HLODCluster3D::clear_proxy);
 	ClassDB::bind_method(D_METHOD("update_children"), &HLODCluster3D::update_children);
 

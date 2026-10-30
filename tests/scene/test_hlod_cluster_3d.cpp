@@ -181,6 +181,60 @@ TEST_CASE("[SceneTree][HLODCluster3D] Nested clusters") {
 	memdelete(outer);
 }
 
+TEST_CASE("[SceneTree][HLODCluster3D] Building a grid") {
+	HLODCluster3D *cluster = memnew(HLODCluster3D);
+	cluster->set_simplify_ratio(1.0f);
+	cluster->set_switch_distance(80.0f);
+	_add_sphere(cluster, Vector3(1, 0, 1));
+	_add_sphere(cluster, Vector3(2, 0, 2));
+	_add_sphere(cluster, Vector3(25, 0, 1));
+	_add_sphere(cluster, Vector3(26, 0, 2));
+	_add_sphere(cluster, Vector3(60, 0, 1));
+	SceneTree::get_singleton()->get_root()->add_child(cluster);
+
+	Ref<SphereMesh> reference;
+	reference.instantiate();
+	reference->set_radial_segments(32);
+	reference->set_rings(16);
+
+	ERR_PRINT_OFF;
+	CHECK(cluster->build_grid(0.0f) == ERR_INVALID_PARAMETER);
+	ERR_PRINT_ON;
+
+	REQUIRE(cluster->build_grid(20.0f) == OK);
+
+	// Three occupied cells: x in [0, 20), [20, 40) and [60, 80).
+	CHECK(cluster->get_child_count(false) == 3);
+	int total = 0;
+	for (int i = 0; i < cluster->get_child_count(false); i++) {
+		HLODCluster3D *cell = Object::cast_to<HLODCluster3D>(cluster->get_child(i, false));
+		REQUIRE(cell != nullptr);
+		CHECK(cell->get_switch_distance() == doctest::Approx(40.0f));
+		REQUIRE(cell->get_proxy_mesh().is_valid());
+		total += cell->get_child_count(false);
+	}
+	CHECK(total == 5);
+	REQUIRE(cluster->get_proxy_mesh().is_valid());
+	CHECK(_index_count(cluster->get_proxy_mesh()) == _index_count(reference) * 5);
+
+	// Reparenting keeps the global transform of the objects.
+	MeshInstance3D *moved = nullptr;
+	for (int i = 0; i < cluster->get_child_count(false) && !moved; i++) {
+		Node *cell = cluster->get_child(i, false);
+		for (int j = 0; j < cell->get_child_count(false); j++) {
+			MeshInstance3D *candidate = Object::cast_to<MeshInstance3D>(cell->get_child(j, false));
+			if (candidate && Math::is_equal_approx(candidate->get_global_position().x, 60.0f)) {
+				moved = candidate;
+				break;
+			}
+		}
+	}
+	CHECK(moved != nullptr);
+
+	SceneTree::get_singleton()->get_root()->remove_child(cluster);
+	memdelete(cluster);
+}
+
 TEST_CASE("[SceneTree][HLODCluster3D] Generating without geometry fails") {
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	SceneTree::get_singleton()->get_root()->add_child(cluster);
