@@ -52,8 +52,10 @@ private:
 	LocalVector<ObjectID> linked_ids;
 	bool relink_queued = false;
 
-	void _collect_geometry(Node *p_node, LocalVector<GeometryInstance3D *> &r_geometry) const;
-	void _collect_meshes(Node *p_node, LocalVector<MeshInstance3D *> &r_meshes) const;
+	// Gathers the geometry that belongs to this cluster. Nested clusters manage their own geometry: their proxies are
+	// reported in `r_nested_proxies`, and their geometry is only reported when `p_descend_nested` is set (used for merging).
+	void _collect_geometry(Node *p_node, LocalVector<GeometryInstance3D *> &r_geometry, LocalVector<GeometryInstance3D *> *r_nested_proxies, bool p_descend_nested) const;
+	void _collect_meshes(LocalVector<MeshInstance3D *> &r_meshes) const;
 	void _update_proxy();
 	void _link_children();
 	void _unlink_children();

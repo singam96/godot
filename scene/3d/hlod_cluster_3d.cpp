@@ -135,24 +135,30 @@ void _simplify_surface_arrays(Array &r_arrays, float p_ratio, float p_error) {
 
 } // namespace
 
-void HLODCluster3D::_collect_geometry(Node *p_node, LocalVector<GeometryInstance3D *> &r_geometry) const {
+void HLODCluster3D::_collect_geometry(Node *p_node, LocalVector<GeometryInstance3D *> &r_geometry, LocalVector<GeometryInstance3D *> *r_nested_proxies, bool p_descend_nested) const {
 	for (int i = 0; i < p_node->get_child_count(false); i++) {
 		Node *child = p_node->get_child(i, false);
-		if (Object::cast_to<HLODCluster3D>(child)) {
-			// Nested clusters manage their own children.
+		HLODCluster3D *nested = Object::cast_to<HLODCluster3D>(child);
+		if (nested) {
+			if (r_nested_proxies) {
+				r_nested_proxies->push_back(nested->proxy);
+			}
+			if (p_descend_nested) {
+				_collect_geometry(nested, r_geometry, r_nested_proxies, p_descend_nested);
+			}
 			continue;
 		}
 		GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
 		if (geometry) {
 			r_geometry.push_back(geometry);
 		}
-		_collect_geometry(child, r_geometry);
+		_collect_geometry(child, r_geometry, r_nested_proxies, p_descend_nested);
 	}
 }
 
-void HLODCluster3D::_collect_meshes(Node *p_node, LocalVector<MeshInstance3D *> &r_meshes) const {
+void HLODCluster3D::_collect_meshes(LocalVector<MeshInstance3D *> &r_meshes) const {
 	LocalVector<GeometryInstance3D *> geometry;
-	_collect_geometry(p_node, geometry);
+	_collect_geometry(const_cast<HLODCluster3D *>(this), geometry, nullptr, true);
 	for (GeometryInstance3D *instance : geometry) {
 		MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(instance);
 		if (mesh_instance) {
@@ -185,7 +191,8 @@ void HLODCluster3D::_link_children() {
 	}
 
 	LocalVector<GeometryInstance3D *> geometry;
-	_collect_geometry(this, geometry);
+	// The proxies of nested clusters follow this cluster's proxy too, which builds the hierarchy of detail levels.
+	_collect_geometry(this, geometry, &geometry, false);
 	for (GeometryInstance3D *instance : geometry) {
 		if (!instance->get_visibility_parent().is_empty()) {
 			// The author already chose a visibility parent for this node.
@@ -281,7 +288,7 @@ Error HLODCluster3D::generate_proxy() {
 	ERR_FAIL_COND_V_MSG(simplify && SurfaceTool::simplify_func == nullptr, ERR_UNAVAILABLE, "Generating an HLOD proxy with simplify_ratio below 1.0 requires the meshoptimizer module.");
 
 	LocalVector<MeshInstance3D *> meshes;
-	_collect_meshes(this, meshes);
+	_collect_meshes(meshes);
 
 	// Surfaces are merged per material to keep the draw call count of the proxy low.
 	struct Batch {

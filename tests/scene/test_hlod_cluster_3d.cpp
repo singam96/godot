@@ -150,6 +150,37 @@ TEST_CASE("[SceneTree][HLODCluster3D] Surfaces are batched per material") {
 	memdelete(cluster);
 }
 
+TEST_CASE("[SceneTree][HLODCluster3D] Nested clusters") {
+	HLODCluster3D *outer = memnew(HLODCluster3D);
+	HLODCluster3D *inner = memnew(HLODCluster3D);
+	outer->add_child(inner);
+	_add_sphere(outer, Vector3(0, 0, 0));
+	_add_sphere(inner, Vector3(3, 0, 0));
+	_add_sphere(inner, Vector3(0, 0, 3));
+	SceneTree::get_singleton()->get_root()->add_child(outer);
+
+	Ref<SphereMesh> reference;
+	reference.instantiate();
+	reference->set_radial_segments(32);
+	reference->set_rings(16);
+
+	SUBCASE("The outer proxy merges the geometry of nested clusters") {
+		outer->set_simplify_ratio(1.0f);
+		REQUIRE(outer->generate_proxy() == OK);
+		CHECK(_index_count(outer->get_proxy_mesh()) == _index_count(reference) * 3);
+	}
+
+	SUBCASE("The inner proxy only merges its own geometry") {
+		inner->set_simplify_ratio(1.0f);
+		REQUIRE(inner->generate_proxy() == OK);
+		CHECK(_index_count(inner->get_proxy_mesh()) == _index_count(reference) * 2);
+		CHECK(outer->get_proxy_mesh().is_null());
+	}
+
+	SceneTree::get_singleton()->get_root()->remove_child(outer);
+	memdelete(outer);
+}
+
 TEST_CASE("[SceneTree][HLODCluster3D] Generating without geometry fails") {
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	SceneTree::get_singleton()->get_root()->add_child(cluster);

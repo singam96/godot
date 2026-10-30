@@ -8,7 +8,9 @@
 		The switch is built on top of [member GeometryInstance3D.visibility_range_begin] and the visibility parent system ([member Node3D.visibility_parent]). The proxy and all descendants switch together based on the distance to the cluster's origin, so place the cluster's origin near the center of the objects it groups.
 		To use it, add the meshes you want to group as descendants of an [HLODCluster3D], then call [method generate_proxy] (for example from a tool script or the editor). The generated [member proxy_mesh] is stored with the scene. Surfaces that share a material are merged into a single surface of the proxy.
 		[b]Note:[/b] Simplification requires the meshoptimizer module. If it is unavailable, [method generate_proxy] fails unless [member simplify_ratio] is [code]1.0[/code].
-		[b]Note:[/b] Descendants that already have [member Node3D.visibility_parent] set are left untouched and are not hidden by the cluster. Nested [HLODCluster3D] nodes are not merged into their parent cluster.
+		[b]Note:[/b] Descendants that already have [member Node3D.visibility_parent] set are left untouched and are not hidden by the cluster.
+		[b]Hierarchy:[/b] [HLODCluster3D] nodes can be nested to build several levels of detail, for example a district made of several streets. The proxy of the outer cluster merges all meshes below it, including those inside nested clusters. When the camera is close enough to the outer cluster, the outer proxy is hidden and each nested cluster takes over with its own [member switch_distance]. Nested clusters should use a smaller [member switch_distance] than the cluster that contains them.
+		In the editor, selecting an [HLODCluster3D] adds a [b]Generate HLOD[/b] button to the toolbar of the 3D editor, which calls [method generate_proxy] and supports undo.
 		[b]Note:[/b] The proxy does not use texture atlases. Surfaces with different materials stay separate surfaces of the proxy mesh.
 	</description>
 	<tutorials>
