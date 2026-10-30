@@ -30,7 +30,10 @@
 
 #include "hlod_cluster_3d.h"
 
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "scene/resources/surface_tool.h"
+#include "servers/rendering/rendering_server.h"
 
 namespace {
 
