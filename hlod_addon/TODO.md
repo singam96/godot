@@ -12,6 +12,7 @@ Done = built, tested, committed and pushed.
 - [x] 4. Streamed navigation and collision: per-cell navmesh baking, ground-ready gating (`addons/world_streaming`)
 - [x] 5. Hitch prevention: time-budgeted work queue, material prewarming (`addons/world_streaming`)
 - [x] 6. Performance budget overlay (`addons/perf_overlay`)
+- [x] Streaming without frame drops: worker-thread instancing, incremental child adding/removal, measured
 - [x] Final: README index, run every test suite, push
 
 Not built on purpose: terrain (use the Terrain3D add-on), sky/weather/water (existing add-ons), animation/AI LOD

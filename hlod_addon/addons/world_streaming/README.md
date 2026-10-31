@@ -25,7 +25,16 @@ streamer below the node that gets shifted.
 ## Hitches
 
 - Loading is threaded. Adding a cell to the tree and freeing one are limited by *Frame Budget* (ms per frame).
-  A single cell is never split, so keep cells small enough to add within a few milliseconds.
+  Without *Incremental Children* a single cell is never split, so keep cells small enough to add within a few milliseconds.
+- *Threaded Instantiate* (on by default) builds a cell's nodes on a worker thread, so only adding it to the tree is
+  left for the main thread. Scripts on the cell's nodes must not touch the scene tree in `_init`.
+- *Incremental Children* (off by default) adds a cell's children a few per frame, and removes them the same way when
+  the cell is unloaded, so one big cell never costs a whole frame. It takes several frames for a cell to appear, and
+  `cell_loaded` is emitted when it is complete. Use it for dense cells (hundreds of nodes or more).
+- Measured on 9 cells of 1500 mesh nodes each (CPU only, headless): worst frame while loading 30 ms on the main
+  thread, 9 ms with a worker thread, 8 ms with incremental children; worst frame while unloading 88 ms, 90 ms and 8 ms.
+  Unloading only improves with *Incremental Children*. These are not GPU numbers: check your own scene with the Perf
+  Overlay.
 - *Prewarm* draws each new cell once, tiny and off-screen, before showing it, so the renderer compiles what it
   needs ahead of time.
 
@@ -47,4 +56,4 @@ streamer below the node that gets shifted.
 `update_now()`, `is_position_loaded(pos)`, `are_required_cells_loaded()`, `get_loaded_counts()`, `get_cell(coord, layer)`,
 `is_busy()`, and the signals `cell_loaded`, `cell_unloaded`, `required_area_ready`, `required_area_lost`.
 
-Tests: `godot --headless --path . -s res://tests/run_streaming_tests.gd` and `run_hitch_tests.gd` (prewarm needs a renderer).
+Tests: `godot --headless --path . -s res://tests/run_streaming_tests.gd`, `run_streaming_threads_tests.gd` and `run_hitch_tests.gd` (prewarm needs a renderer).

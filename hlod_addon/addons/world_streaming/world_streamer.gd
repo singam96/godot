@@ -18,7 +18,7 @@ signal required_area_ready
 signal required_area_lost
 
 enum Layer { DETAIL, FAR }
-enum State { LOADING, PREWARM, LOADED }
+enum State { LOADING, PREWARM, LOADED, INSTANTIATING, PLACING }
 
 ## The node whose position streams the world. If empty, the current camera is used.
 @export var target: NodePath
@@ -43,6 +43,12 @@ enum State { LOADING, PREWARM, LOADED }
 ## Renders every new cell once, tiny and off-screen, before it is shown. This lets the renderer compile what the cell
 ## needs ahead of time and avoids a hitch the first time it is drawn.
 @export var prewarm := false
+## Builds the nodes of a cell on a worker thread, so only adding it to the tree is left for the main thread. Scripts
+## on the cell's nodes must be safe to create off the main thread (no touching the scene tree in _init).
+@export var threaded_instantiate := true
+## Adds the children of a cell a few at a time (and removes them the same way), so one big cell never costs a whole
+## frame; it takes several frames to appear. Needs cells with many separate children to help.
+@export var incremental_children := false
 
 var _cells := {}  ## "layer:x:z" -> {coord, layer, path, state, node}
 var _exists := {}  ## path -> bool
@@ -53,7 +59,9 @@ var _prewarm_viewport: SubViewport
 var _prewarm_camera: Camera3D
 var _pending_free: Array[Node] = []
 var _replan := false  ## A cell arrived; check at once whether it replaces another layer.
-var _abandoned: Array[String] = []  ## Finished requests nobody wants any more.
+var _abandoned: Array[String] = []
+var _orphan_tasks: Array[Dictionary] = []  ## Instantiate jobs of cells that were dropped meanwhile.
+var _dying: Array[Node] = []  ## Cells whose children are being removed a few per frame.  ## Finished requests nobody wants any more.
 
 
 func _ready() -> void:
@@ -183,8 +191,15 @@ func _drop(key: String) -> void:
 			ResourceLoader.load_threaded_get(path)
 		else:
 			_abandoned.append(path)
-	elif cell["node"] != null and is_instance_valid(cell["node"]):
-		_pending_free.append(cell["node"])
+	elif cell["state"] == State.INSTANTIATING:
+		_orphan_tasks.append({"task": cell["task"], "result": cell["result"]})
+	else:
+		var pending: Array = cell.get("pending", [])
+		for i in range(cell.get("next", 0), pending.size()):
+			if is_instance_valid(pending[i]):
+				pending[i].free()  # Not added to the tree yet.
+		if cell["node"] != null and is_instance_valid(cell["node"]):
+			_pending_free.append(cell["node"])
 
 
 func _pump() -> void:
@@ -199,12 +214,40 @@ func _pump() -> void:
 				ResourceLoader.load_threaded_get(_abandoned[i])
 			_abandoned.remove_at(i)
 
+	# Clean up instantiate jobs that nobody wants any more.
+	for i in range(_orphan_tasks.size() - 1, -1, -1):
+		if WorkerThreadPool.is_task_completed(_orphan_tasks[i]["task"]):
+			WorkerThreadPool.wait_for_task_completion(_orphan_tasks[i]["task"])
+			var stray = _orphan_tasks[i]["result"][0]
+			if stray != null:
+				stray.free()
+			_orphan_tasks.remove_at(i)
+
 	# Free, within budget.
 	while not _pending_free.is_empty() and Time.get_ticks_usec() - start < budget:
 		var node: Node = _pending_free.pop_back()
 		if is_instance_valid(node):
-			var coord: Vector2i = node.get_meta("world_streaming_coord", Vector2i.ZERO)
-			node.queue_free()
+			if incremental_children and node.get_child_count() > 1:
+				_dying.append(node)
+			else:
+				var coord: Vector2i = node.get_meta("world_streaming_coord", Vector2i.ZERO)
+				node.queue_free()
+				cell_unloaded.emit(coord)
+	var freed_one := false
+	while not _dying.is_empty() and (not freed_one or Time.get_ticks_usec() - start < budget):
+		var dying: Node = _dying[0]
+		if not is_instance_valid(dying):
+			_dying.remove_at(0)
+			continue
+		if dying.get_child_count() > 0:
+			var child := dying.get_child(dying.get_child_count() - 1)
+			dying.remove_child(child)
+			child.queue_free()
+			freed_one = true
+		else:
+			var coord: Vector2i = dying.get_meta("world_streaming_coord", Vector2i.ZERO)
+			dying.queue_free()
+			_dying.remove_at(0)
 			cell_unloaded.emit(coord)
 
 	# Prewarm finishing and loading results, closest cell first.
@@ -223,26 +266,50 @@ func _pump() -> void:
 			State.PREWARM:
 				if Engine.get_process_frames() - cell["frame"] >= 2:
 					loading.append(cell)
+			State.INSTANTIATING, State.PLACING:
+				loading.append(cell)
 
+	var processed := 0
 	for cell in loading:
-		if Time.get_ticks_usec() - start >= budget:
+		# At least one cell moves on every frame, even with a tiny budget, so loading can't starve.
+		if processed > 0 and Time.get_ticks_usec() - start >= budget:
 			break
+		processed += 1
 		if cell["state"] == State.PREWARM:
 			_finish_prewarm(cell)
+			continue
+		if cell["state"] == State.INSTANTIATING:
+			if WorkerThreadPool.is_task_completed(cell["task"]):
+				WorkerThreadPool.wait_for_task_completion(cell["task"])
+				var built = cell["result"][0]
+				cell["result"] = null
+				if built == null:
+					push_error("WorldStreamer could not instantiate '%s'." % cell["path"])
+					cell["state"] = State.LOADED
+				else:
+					_instantiated(cell, built)
+			continue
+		if cell["state"] == State.PLACING:
+			_place_some(cell, start, budget)
 			continue
 		var status := ResourceLoader.load_threaded_get_status(cell["path"])
 		if status == ResourceLoader.THREAD_LOAD_LOADED:
 			var packed := ResourceLoader.load_threaded_get(cell["path"]) as PackedScene
-			var node := packed.instantiate() as Node3D if packed != null else null
-			if node == null:
-				push_error("WorldStreamer could not instantiate '%s'." % cell["path"])
+			if packed == null:
+				push_error("WorldStreamer could not load '%s'." % cell["path"])
 				cell["state"] = State.LOADED
-				continue
-			node.set_meta("world_streaming_coord", cell["coord"])
-			if prewarm:
-				_start_prewarm(cell, node)
+			elif threaded_instantiate:
+				var result: Array = [null]
+				cell["result"] = result
+				cell["state"] = State.INSTANTIATING
+				cell["task"] = WorkerThreadPool.add_task(func(): result[0] = packed.instantiate(), false, "WorldStreamer cell")
 			else:
-				_place(cell, node)
+				var node := packed.instantiate() as Node3D
+				if node == null:
+					push_error("WorldStreamer could not instantiate '%s'." % cell["path"])
+					cell["state"] = State.LOADED
+				else:
+					_instantiated(cell, node)
 		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
 			push_error("WorldStreamer failed to load '%s'." % cell["path"])
 			cell["state"] = State.LOADED
@@ -263,12 +330,60 @@ func _pump() -> void:
 			cell["state"] = State.LOADED
 
 
+func _instantiated(cell: Dictionary, node: Node) -> void:
+	var node3d := node as Node3D
+	if node3d == null:
+		push_error("The root of '%s' is not a Node3D." % cell["path"])
+		node.free()
+		cell["state"] = State.LOADED
+		return
+	node3d.set_meta("world_streaming_coord", cell["coord"])
+	if prewarm:
+		_start_prewarm(cell, node3d)
+	else:
+		_place(cell, node3d)
+
+
 func _place(cell: Dictionary, node: Node3D) -> void:
 	cell["node"] = node
+	if incremental_children and node.get_child_count() > 1:
+		# Add the empty cell now and its children over the next frames.
+		var pending: Array = node.get_children()
+		for child in pending:
+			node.remove_child(child)
+		cell["pending"] = pending
+		cell["next"] = 0
+		cell["state"] = State.PLACING
+		add_child(node)
+		return
 	cell["state"] = State.LOADED
 	add_child(node)
 	_replan = true
 	cell_loaded.emit(cell["coord"], node)
+
+
+## The scene's owners only matter for saving; clearing them avoids warnings when the child is moved.
+static func _clear_owner(node: Node, owner: Node) -> void:
+	if node.owner == owner:
+		node.owner = null
+	for child in node.get_children():
+		_clear_owner(child, owner)
+
+
+func _place_some(cell: Dictionary, start: int, budget: int) -> void:
+	var node: Node3D = cell["node"]
+	var pending: Array = cell["pending"]
+	var added := 0
+	while cell["next"] < pending.size() and (added == 0 or Time.get_ticks_usec() - start < budget):
+		_clear_owner(pending[cell["next"]], node)
+		node.add_child(pending[cell["next"]])
+		cell["next"] += 1
+		added += 1
+	if cell["next"] >= pending.size():
+		cell.erase("pending")
+		cell["state"] = State.LOADED
+		_replan = true
+		cell_loaded.emit(cell["coord"], node)
 
 
 func _start_prewarm(cell: Dictionary, node: Node3D) -> void:
@@ -361,9 +476,29 @@ func get_cell(coord: Vector2i, layer := Layer.DETAIL) -> Node3D:
 
 ## True while any cell is still being requested, instantiated or freed.
 func is_busy() -> bool:
-	if not _pending_free.is_empty():
+	if not _pending_free.is_empty() or not _dying.is_empty():
 		return true
 	for key in _cells:
 		if _cells[key]["state"] != State.LOADED:
 			return true
 	return false
+
+
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_PREDELETE:
+		return
+	# Nodes that are not in the tree are not freed with it.
+	for task in _orphan_tasks:
+		WorkerThreadPool.wait_for_task_completion(task["task"])
+		if task["result"][0] != null:
+			task["result"][0].free()
+	for key in _cells:
+		var cell: Dictionary = _cells[key]
+		if cell["state"] == State.INSTANTIATING:
+			WorkerThreadPool.wait_for_task_completion(cell["task"])
+			if cell["result"][0] != null:
+				cell["result"][0].free()
+		var pending: Array = cell.get("pending", [])
+		for i in range(cell.get("next", 0), pending.size()):
+			if is_instance_valid(pending[i]) and pending[i].get_parent() == null:
+				pending[i].free()

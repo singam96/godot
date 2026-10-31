@@ -35,6 +35,7 @@ godot --headless --import --path .
 godot --headless --path . -s res://tests/run_tests.gd            # hlod
 godot --headless --path . -s res://tests/run_occluder_tests.gd
 godot --headless --path . -s res://tests/run_streaming_tests.gd
+godot --headless --path . -s res://tests/run_streaming_threads_tests.gd
 godot --headless --path . -s res://tests/run_foliage_tests.gd
 godot --headless --path . -s res://tests/run_origin_tests.gd
 godot --headless --path . -s res://tests/run_hitch_tests.gd
