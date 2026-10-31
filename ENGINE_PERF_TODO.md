@@ -17,4 +17,5 @@ Each item is committed with its own tests.
   `rendering/limits/multimesh/gpu_culling_min_instances` (0 = off). A compute pass copies the instances in view to a second
   buffer with the same layout and writes the count into an indirect draw, so no shader changes. Test: `hlod_addon/tests/run_multimesh_cull_tests.gd`.
   Not culled: 2D, user indirect, motion vectors, multiview/XR, lower mesh LODs, dual-paraboloid shadows, other passes.
-- [ ] **Scene tree bulk attach/detach**: measure first.
+- [x] **Scene tree bulk attach/detach**: measured, not changed. `add_child` of a prebuilt subtree costs about 1.4 us per node
+  (5000 nodes: 7 ms). The longer frame after it is rendering, not the tree, so a bulk attach in C++ would save little.
