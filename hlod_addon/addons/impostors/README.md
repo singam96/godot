@@ -40,17 +40,29 @@ impostor distance well above the cluster's own switch distance.
 
 ## Shadows
 
-Impostors cast shadows (*Cast Shadows* on the Impostor3D, on by default). In the shadow pass the quad faces the light
-and shows the baked view that looks along the light, so the object's cut-out silhouette is what falls on the ground,
-in the right place: in a test the shadow of a baked sphere had the same area as the real one (1814 vs 1813 pixels).
-Things to know:
+**Casting.** Impostors cast shadows (*Cast Shadows* on the Impostor3D, on by default). A hidden shadows-only copy of
+the quad faces the light and shows the baked view that looks along it, so the object's cut-out silhouette is what falls
+on the ground, in the right place: in a test the shadow of a baked sphere had the same area as the real one (1814 vs
+1813 pixels).
 
 - The shadow is only as accurate as the baked views near the sun. Trees are forgiving; long thin objects are not.
   Choose *Min/Max Elevation* so that the rows cover the sun's elevation, and use 3 to 4 rows. With 12 views and 4 rows a
   12 m long box's shadow was within 9% of the real one; with only 2 rows (10 and 55 degrees) it was 19% too small.
 - Shadows stop at the light's *Shadow Max Distance*, so impostors beyond it cast none, and they cost shadow-map time
   like any other caster. Turn *Cast Shadows* off for impostors that are far enough not to matter.
-- Point and spot lights work the same way, but the quad turns towards the light, so keep impostors out of their near range.
+- Point and spot lights work the same way, but I only tested a directional light.
+
+**Receiving.** Nothing about shadows is baked into the pictures: the bake uses flat ambient light and stores only color
+and normals. Shadows on an impostor are worked out live from your scene's shadow maps, and by default an impostor
+*does not receive* them (`ImpostorData.receive_shadows = false`). The reason: a flat camera-facing quad would sit inside
+the shadow of its own light-facing copy and come out dark. Receiving shadows needs that copy to be moved back along the
+light ray, which also cuts the lower part off the shadow the impostor casts (a tree's base, where the shadow matters most).
+Set `receive_shadows = true` if shadows from other objects (a mountain, a building) falling on far objects matter more
+than the exact shadow they cast. Either way:
+
+- It is a flat quad, so a received shadow is applied across the plane through the object's center, not per leaf.
+- Self-shadowing inside the object (leaves shading each other) is not there, because it isn't baked. If you want it,
+  bake with an ambient occlusion pass (not built yet).
 
 ## Limits
 

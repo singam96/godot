@@ -5,6 +5,7 @@ extends Resource
 
 const SHADER := preload("impostor.gdshader")
 const LIT_SHADER := preload("impostor_lit.gdshader")
+const SHADOW_SHADER := preload("impostor_shadow.gdshader")
 
 ## Columns are views around the object (azimuth), rows are views from higher up (elevation).
 @export var atlas: Texture2D
@@ -12,6 +13,10 @@ const LIT_SHADER := preload("impostor_lit.gdshader")
 @export var normal_atlas: Texture2D
 ## Light the impostor with the scene's lights (needs [member normal_atlas]).
 @export var lit := true
+## Let shadows of other objects fall on the impostor (needs [member lit]). Off by default: a flat camera-facing quad
+## would otherwise sit inside its own shadow, which is avoided by moving its shadow back along the light ray, and that
+## cuts the lower part off the shadow it casts on the ground. With this off, the shadow it casts is exact.
+@export var receive_shadows := false
 @export_range(1, 64) var views := 12
 @export_range(1, 8) var rows := 2
 @export_range(0.0, 90.0, 0.1, "degrees") var min_elevation := 10.0
@@ -25,7 +30,10 @@ const LIT_SHADER := preload("impostor_lit.gdshader")
 func create_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	var use_light := lit and normal_atlas != null
-	material.shader = LIT_SHADER if use_light else SHADER
+	if use_light:
+		material.shader = LIT_SHADER if receive_shadows else _lit_shader_without_shadows()
+	else:
+		material.shader = SHADER
 	material.set_shader_parameter("atlas", atlas)
 	if use_light:
 		material.set_shader_parameter("normal_atlas", normal_atlas)
@@ -34,6 +42,31 @@ func create_material() -> ShaderMaterial:
 	material.set_shader_parameter("min_elevation", deg_to_rad(min_elevation))
 	material.set_shader_parameter("max_elevation", deg_to_rad(max_elevation))
 	material.set_shader_parameter("center", center)
+	return material
+
+
+static var _lit_without_shadows: Shader
+
+
+static func _lit_shader_without_shadows() -> Shader:
+	if _lit_without_shadows == null:
+		_lit_without_shadows = Shader.new()
+		_lit_without_shadows.code = LIT_SHADER.code.replace("specular_disabled;", "specular_disabled, shadows_disabled;")
+	return _lit_without_shadows
+
+
+## The material for the shadows-only copy of the impostor (see [Impostor3D]). It is not meant for the camera.
+func create_shadow_material() -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = SHADOW_SHADER
+	material.set_shader_parameter("atlas", atlas)
+	material.set_shader_parameter("views", views)
+	material.set_shader_parameter("rows", rows)
+	material.set_shader_parameter("min_elevation", deg_to_rad(min_elevation))
+	material.set_shader_parameter("max_elevation", deg_to_rad(max_elevation))
+	material.set_shader_parameter("center", center)
+	material.set_shader_parameter("quad_size", quad_size)
+	material.set_shader_parameter("shift", 0.6 if (lit and normal_atlas != null and receive_shadows) else 0.0)
 	return material
 
 

@@ -23,7 +23,8 @@ void vertex() {
 	vec3 right = INV_VIEW_MATRIX[0].xyz;
 	vec3 up = INV_VIEW_MATRIX[1].xyz;
 	vec3 world_pos = world_center + (right * VERTEX.x + up * VERTEX.y) * s;
-	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
+	// Lighting and shadows use VERTEX, so put the billboarded corner there (in model space; the engine transforms it).
+	VERTEX = (inverse(m) * vec4(world_pos, 1.0)).xyz;
 
 	// Direction from the object's center to the camera, in the object's own space.
 	vec3 cam_local = (inverse(m) * vec4(INV_VIEW_MATRIX[3].xyz, 1.0)).xyz;

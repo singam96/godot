@@ -99,6 +99,17 @@ func _shadow_stats(subject: Node3D, camera: Camera3D) -> Array:
 	return [dark, min_x, max_x]
 
 
+## Brightness (red channel) at the left and right side of the middle of the screen.
+func _half_brightness(_camera: Camera3D, _unused) -> Array:
+	for i in 5:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	var img := root.get_texture().get_image()
+	var cx := img.get_width() / 2
+	var cy := img.get_height() / 2
+	return [img.get_pixel(cx - 14, cy).r, img.get_pixel(cx + 14, cy).r]
+
+
 func _shadow_case(label: String, source: Node3D, data: ImpostorData, camera: Camera3D) -> void:
 	var real_stats: Array = await _shadow_stats(source.duplicate(), camera)
 	var imp := Impostor3D.new()
@@ -299,6 +310,8 @@ func _init() -> void:
 	_check(absf(leaf_normal.b - 1.0) < 0.1 or absf(leaf_normal.b - 0.0) < 0.1, "a flat leaf facing the camera has a +z or -z normal %s" % leaf_normal)
 	leaf_source.free()
 
+	lit_data.lit = true  # An earlier section switched it off.
+
 	print("shadows: impostors cast the silhouette of the view that looks along the light")
 	var ground := MeshInstance3D.new()
 	var ground_mesh := BoxMesh.new()
@@ -341,6 +354,57 @@ func _init() -> void:
 	shadow_sun.free()
 	ground.free()
 	long_box.free()
+
+	print("shadows received on the impostor")
+	shadow_sun = DirectionalLight3D.new()
+	shadow_sun.shadow_enabled = true
+	shadow_sun.directional_shadow_max_distance = 300.0
+	root.add_child(shadow_sun)
+	shadow_sun.basis = Basis.looking_at(Vector3(0, -0.5, -1))
+	var side_cam := Camera3D.new()
+	root.add_child(side_cam)
+	side_cam.current = true
+	side_cam.fov = 10
+	side_cam.position = Vector3(0, 3, 200)
+	side_cam.look_at(Vector3(0, 3, 0))
+	var wall := MeshInstance3D.new()
+	var wall_mesh := BoxMesh.new()
+	wall_mesh.size = Vector3(6, 8, 3)
+	wall.mesh = wall_mesh
+	# On the ray from the object towards the sun (above and in front of it), over its right half; the camera, at the
+	# same height as the object, does not see it in the middle of the screen.
+	wall.position = Vector3(3.0, 10, 14)
+	var real_lit := sphere_source.duplicate() as Node3D
+	root.add_child(real_lit)
+	var real_open := await _half_brightness(side_cam, null)
+	root.add_child(wall)
+	var real_wall := await _half_brightness(side_cam, null)
+	root.remove_child(wall)
+	real_lit.free()
+	_check(real_wall[1] < real_open[1] - 0.05, "the wall shades the right half of the real sphere (%s -> %s)" % [real_open, real_wall])
+	for receive in [false, true]:
+		lit_data.receive_shadows = receive
+		var recv_imp := Impostor3D.new()
+		recv_imp.data = lit_data
+		recv_imp.switch_distance = 1.0
+		recv_imp.switch_margin = 0.0
+		root.add_child(recv_imp)
+		var open_halves := await _half_brightness(side_cam, null)
+		root.add_child(wall)
+		var wall_halves := await _half_brightness(side_cam, null)
+		root.remove_child(wall)
+		recv_imp.free()
+		_check(absf(open_halves[0] - real_open[0]) < 0.12 and absf(open_halves[1] - real_open[1]) < 0.12,
+				"receive=%s: an unshadowed impostor is as bright as the real sphere, not dark from self-shadowing (%s vs %s)" % [receive, open_halves, real_open])
+		if receive:
+			_check(wall_halves[1] < open_halves[1] - 0.05 and absf(wall_halves[0] - open_halves[0]) < 0.05,
+					"receive=true: the wall shades the right half only (%s -> %s)" % [open_halves, wall_halves])
+		else:
+			_check(absf(wall_halves[1] - open_halves[1]) < 0.03, "receive=false: the wall does not change it (%s -> %s)" % [open_halves, wall_halves])
+	lit_data.receive_shadows = false
+	wall.free()
+	side_cam.free()
+	shadow_sun.free()
 
 	print("old data without normals still works")
 	var legacy := ImpostorData.new()

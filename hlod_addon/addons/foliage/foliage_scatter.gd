@@ -108,6 +108,8 @@ func generate() -> int:
 				chunk.owner = owner_node
 				for part in chunk.get_children():
 					part.owner = owner_node
+					for sub in part.get_children():
+						sub.owner = owner_node
 			_count += transforms.size()
 	return _count
 
@@ -206,12 +208,25 @@ func _make_far(transforms: Array[Transform3D]) -> MultiMeshInstance3D:
 	node.name = "Far"
 	node.multimesh = impostor.create_multimesh(transforms)
 	node.set_meta(META_KEY, true)
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows \
-			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# The camera-facing quad would shadow itself, so shadows come from a separate shadows-only copy (see Impostor3D).
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_far_ranges(node)
+	if cast_shadows:
+		var caster := MultiMeshInstance3D.new()
+		caster.name = "FarShadow"
+		caster.multimesh = node.multimesh
+		caster.material_override = impostor.create_shadow_material()
+		caster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		caster.set_meta(META_KEY, true)
+		_far_ranges(caster)
+		node.add_child(caster)
+	return node
+
+
+func _far_ranges(node: GeometryInstance3D) -> void:
 	node.visibility_range_begin = near_distance
 	node.visibility_range_begin_margin = margin
 	node.visibility_range_fade_mode = fade_mode as GeometryInstance3D.VisibilityRangeFadeMode
 	if max_distance > 0.0:
 		node.visibility_range_end = max_distance
 		node.visibility_range_end_margin = margin
-	return node

@@ -9,12 +9,13 @@ extends MeshInstance3D
 		data = value
 		_update()
 
-## Cast the baked silhouette as a shadow. In the shadow pass the quad faces the light and shows the baked view that
-## looks along the light, so its cut-out shape is what falls on the ground. Shadows still stop at the light's shadow distance.
+## Cast the baked silhouette as a shadow. A hidden shadows-only copy of the quad faces the light and shows the baked
+## view that looks along it, so its cut-out shape is what falls on the ground. (The impostor itself never casts, a
+## camera-facing quad would shadow itself.) Shadows still stop at the light's shadow distance.
 @export var cast_shadows := true:
 	set(value):
 		cast_shadows = value
-		cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if value else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_update()
 
 @export_group("Switching")
 ## Beyond this distance the impostor is shown instead of the target.
@@ -39,6 +40,14 @@ extends MeshInstance3D
 		_update()
 
 
+var _caster: MeshInstance3D
+
+
+func _init() -> void:
+	# The impostor itself never casts: a camera-facing quad would shadow itself. See _caster.
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
 func _enter_tree() -> void:
 	_update()
 
@@ -50,12 +59,32 @@ func _exit_tree() -> void:
 func _update() -> void:
 	if data == null:
 		mesh = null
+		_set_caster(false)
 		return
 	mesh = data.create_mesh()
 	visibility_range_begin = switch_distance
 	visibility_range_begin_margin = switch_margin
 	visibility_range_fade_mode = fade_mode as GeometryInstance3D.VisibilityRangeFadeMode
+	_set_caster(cast_shadows)
 	_apply_to_target()
+
+
+func _set_caster(enabled: bool) -> void:
+	if not enabled:
+		if _caster != null:
+			remove_child(_caster)
+			_caster.free()
+			_caster = null
+		return
+	if _caster == null:
+		_caster = MeshInstance3D.new()
+		_caster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		add_child(_caster, false, Node.INTERNAL_MODE_BACK)
+	_caster.mesh = mesh
+	_caster.material_override = data.create_shadow_material()
+	_caster.visibility_range_begin = switch_distance
+	_caster.visibility_range_begin_margin = switch_margin
+	_caster.visibility_range_fade_mode = fade_mode as GeometryInstance3D.VisibilityRangeFadeMode
 
 
 func _target_geometry() -> Array[GeometryInstance3D]:
