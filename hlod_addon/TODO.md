@@ -8,7 +8,7 @@ Done = built, tested, committed and pushed.
 - [x] Impostors (`addons/impostors`)
 - [x] 1. World streaming: cell loader with a frame budget, far cells, cell splitter (`addons/world_streaming`)
 - [x] 2. Foliage scattering: chunked MultiMesh with real, impostor and cull levels (`addons/foliage`)
-- [ ] 3. Large-world precision: origin shifting and absolute coordinates (`addons/origin_shift`)
+- [x] 3. Large-world precision: origin shifting and absolute coordinates (`addons/origin_shift`)
 - [x] 4. Streamed navigation and collision: per-cell navmesh baking, ground-ready gating (`addons/world_streaming`)
 - [ ] 5. Hitch prevention: time-budgeted work queue, material prewarming (`addons/world_streaming`)
 - [ ] 6. Performance budget overlay (`addons/perf_overlay`)
