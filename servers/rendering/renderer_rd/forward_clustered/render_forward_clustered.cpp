@@ -5364,7 +5364,7 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 
 RenderForwardClustered::RenderForwardClustered() {
 	multimesh_cull = memnew(RendererRD::MultiMeshCull);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/limits/multimesh/gpu_culling_min_instances", PROPERTY_HINT_RANGE, "0,1000000,1,or_greater"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/limits/multimesh/gpu_culling_min_instances", PROPERTY_HINT_RANGE, "0,1000000,1,or_greater"), 1000);
 	singleton = this;
 
 	/* SCENE SHADER */

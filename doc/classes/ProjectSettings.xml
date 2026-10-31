@@ -3188,7 +3188,7 @@
 		<member name="rendering/lights_and_shadows/directional_shadow/16_bits" type="bool" setter="" getter="" default="true">
 			Use 16 bits for the directional shadow depth map. Enabling this results in shadows having less precision and may result in shadow acne, but can lead to performance improvements on some devices.
 		</member>
-		<member name="rendering/lights_and_shadows/directional_shadow/cache_far_cascades" type="int" setter="" getter="" default="0">
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_far_cascades" type="int" setter="" getter="" default="2">
 			Number of the farthest [DirectionalLight3D] shadow cascades that are kept between frames instead of being rendered every frame. [code]0[/code] disables caching and renders all cascades every frame. A cached cascade is rendered with a margin (see [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_margin]) and reused until the part of the view it covers leaves that margin, its light changes, or [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_max_age_frames] frames have passed. Shadows of objects that move inside a cached cascade can therefore be out of date by up to that many frames. The nearest cascade is never cached.
 			Only supported by the Forward+ renderer.
 		</member>
@@ -3261,7 +3261,7 @@
 			The maximum number of uniforms that can be used by the global shader uniform buffer. Each item takes up one slot. In other words, a single uniform float and a uniform vec4 will take the same amount of space in the buffer.
 			[b]Note:[/b] When using the Compatibility renderer, most mobile devices (and all web exports) will be limited to a maximum size of 1024 due to hardware constraints.
 		</member>
-		<member name="rendering/limits/multimesh/gpu_culling_min_instances" type="int" setter="" getter="" default="0">
+		<member name="rendering/limits/multimesh/gpu_culling_min_instances" type="int" setter="" getter="" default="1000">
 			If greater than [code]0[/code], [MultiMesh]es with at least this many instances are culled per instance on the GPU, so only the instances that are in view are drawn, both in the main view and in each shadow pass. [code]0[/code] disables it. The visible instances are copied to a second buffer every frame, which costs memory the size of the [MultiMesh]'s own instance buffer (and one more for the shadow passes).
 			Supported by the Forward+ renderer for 3D [MultiMesh]es. [MultiMesh]es that use indirect draws, motion vectors, or are drawn with multiview (XR) are not culled, and neither are objects drawn at a lower mesh level of detail than the first.
 		</member>
@@ -3566,7 +3566,7 @@
 		<member name="rendering/textures/streaming/max_ops_per_second" type="int" setter="" getter="" default="200">
 			The maximum number of texture streaming operations (loading/unloading mipmaps) per second. Higher values allow faster adaptation to scene changes but may impact performance.
 		</member>
-		<member name="rendering/textures/streaming/max_upload_mb_per_second" type="int" setter="" getter="" default="0">
+		<member name="rendering/textures/streaming/max_upload_mb_per_second" type="int" setter="" getter="" default="128">
 			Maximum amount of texture data, in megabytes per second, that texture streaming uploads when it raises the resolution of textures. Each upload counts as the size of the whole new texture, and the next one waits until the budget allows it. This spreads loading over many frames instead of letting it land in a few. [code]0[/code] means no limit. Not applied when streaming is flushed.
 		</member>
 		<member name="rendering/textures/streaming/memory_budget_enabled" type="bool" setter="" getter="" default="false">

@@ -133,6 +133,8 @@ func _shadow_case(label: String, source: Node3D, data: ImpostorData, camera: Cam
 
 
 func _init() -> void:
+	# These tests add shadow casters and read the shadow a few frames later: no cached cascades.
+	ProjectSettings.set_setting("rendering/lights_and_shadows/directional_shadow/cache_far_cascades", 0)
 	root.size = Vector2i(320, 320)
 	var env := WorldEnvironment.new()
 	env.environment = Environment.new()

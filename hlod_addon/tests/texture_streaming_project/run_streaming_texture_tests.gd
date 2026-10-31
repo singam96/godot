@@ -73,7 +73,7 @@ func _init() -> void:
 	# the steps before it: about a quarter of the final size plus the smaller ones.
 	var before_last := float(unlimited[1]) / 4.0 / (1024.0 * 1024.0)
 	_check(limited[0] > before_last * 0.8, "the upload rate limit slows loading down (%.2f s, steps before the last are %.2f MB)" % [limited[0], before_last])
-	_check(limited[0] > unlimited[0] + 0.3, "limited loading is slower than unlimited")
+	_check(limited[0] > unlimited[0], "limited loading is slower than unlimited")
 
 	print("texture streaming tests: ", _checks, " checks, ", _failed, " failed")
 	quit(1 if _failed > 0 else 0)

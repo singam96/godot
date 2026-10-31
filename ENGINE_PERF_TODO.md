@@ -19,3 +19,8 @@ Each item is committed with its own tests.
   Not culled: 2D, user indirect, motion vectors, multiview/XR, lower mesh LODs, dual-paraboloid shadows, other passes.
 - [x] **Scene tree bulk attach/detach**: measured, not changed. `add_child` of a prebuilt subtree costs about 1.4 us per node
   (5000 nodes: 7 ms). The longer frame after it is rendering, not the tree, so a bulk attach in C++ would save little.
+
+## Defaults
+All three are on by default: `cache_far_cascades` = 2, `gpu_culling_min_instances` = 1000, `max_upload_mb_per_second` = 128.
+Set them to 0 to get the previous behaviour. Cached shadow cascades can show a newly added or moved caster up to
+`cache_max_age_frames` frames late.

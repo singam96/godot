@@ -4645,7 +4645,7 @@ RendererSceneCull::RendererSceneCull() {
 
 	light_culler = memnew(RenderingLightCuller);
 
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_far_cascades", PROPERTY_HINT_RANGE, "0,3,1"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_far_cascades", PROPERTY_HINT_RANGE, "0,3,1"), 2);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/directional_shadow/cache_margin", PROPERTY_HINT_RANGE, "0.05,2.0,0.01"), 0.25);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_max_age_frames", PROPERTY_HINT_RANGE, "1,240,1"), 8);
 	bool tighter_caster_culling = GLOBAL_DEF("rendering/lights_and_shadows/tighter_shadow_caster_culling", true);
