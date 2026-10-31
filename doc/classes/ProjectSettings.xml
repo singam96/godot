@@ -3566,6 +3566,9 @@
 		<member name="rendering/textures/streaming/max_ops_per_second" type="int" setter="" getter="" default="200">
 			The maximum number of texture streaming operations (loading/unloading mipmaps) per second. Higher values allow faster adaptation to scene changes but may impact performance.
 		</member>
+		<member name="rendering/textures/streaming/max_upload_mb_per_second" type="int" setter="" getter="" default="0">
+			Maximum amount of texture data, in megabytes per second, that texture streaming uploads when it raises the resolution of textures. Each upload counts as the size of the whole new texture, and the next one waits until the budget allows it. This spreads loading over many frames instead of letting it land in a few. [code]0[/code] means no limit. Not applied when streaming is flushed.
+		</member>
 		<member name="rendering/textures/streaming/memory_budget_enabled" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], limits the maximum VRAM allocated for streamed textures to the value specified in [member rendering/textures/streaming/memory_budget_mb]. If exceeded, the system reduces the resolution of textures to stay within budget.
 		</member>

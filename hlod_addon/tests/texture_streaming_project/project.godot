@@ -1,0 +1,10 @@
+config_version=5
+
+[application]
+config/name="Texture streaming tests"
+
+[rendering]
+textures/streaming/enabled=true
+textures/streaming/memory_budget_enabled=false
+textures/streaming/max_lod=6
+textures/streaming/inactivity_decay_rate_ms=0
