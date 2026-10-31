@@ -60,9 +60,29 @@ light ray, which also cuts the lower part off the shadow the impostor casts (a t
 Set `receive_shadows = true` if shadows from other objects (a mountain, a building) falling on far objects matter more
 than the exact shadow they cast. Either way:
 
-- It is a flat quad, so a received shadow is applied across the plane through the object's center, not per leaf.
-- Self-shadowing inside the object (leaves shading each other) is not there, because it isn't baked. If you want it,
-  bake with an ambient occlusion pass (not built yet).
+- By default the impostor is a flat quad, so a received shadow is looked up across the plane through the object's
+  center. *Receive Detail* (`ImpostorData.receive_detail`, with `receive_shadows` on) subdivides the quad and pushes
+  its vertices to the baked surface, so shadows are looked up by region (see Depth and occlusion below).
+
+## Depth and occlusion
+
+With *Depth and ambient occlusion* on (the default when lit), the bake adds a third pass that stores, per pixel, the
+depth of the surface and an ambient occlusion value (the engine's SSAO, so it needs the Forward+ renderer; with another
+renderer the occlusion is simply 1.0).
+
+- **Depth buffer.** The impostor writes the real depth of each pixel, so it intersects other geometry and other
+  impostors the way the real object would, instead of being a flat plane at its center: a cube inside a baked sphere
+  stays hidden (tested). Written for the Forward+ and Mobile renderers.
+- **Ambient occlusion** darkens the ambient light in creases and deep inside the object, like leaves shading each
+  other. `ao_strength` scales it, and `ao_light_affect` (default 0.4) lets part of it darken direct light too, as a
+  stand-in for self-shadowing from the sun. The sun's own shadows inside the object are *not* baked: that would need a
+  bake per sun direction, so this is an approximation.
+- **Received shadows by region.** A shader cannot change the position that shadow lookups use (it is read-only in the
+  fragment stage), so true per-pixel received shadows are not possible. *Receive Detail* n builds the quad as n x n
+  cells and moves its vertices to the baked surface in the vertex shader. With 16 cells, a shadow band on a sphere landed
+  almost where it does on the real sphere (mean error 0.06 against 0.38 for the flat quad). It costs 2 x n x n
+  triangles per impostor, so use it for a few big, important impostors, not for thousands of trees.
+- The bake takes three passes instead of two and the file has a third atlas.
 
 ## Limits
 
@@ -73,8 +93,8 @@ than the exact shadow they cast. Either way:
   (`ImpostorData.lit = false`), or old data without normals, which falls back to unlit by itself. The normal atlas
   doubles the bake time and the file size.
 - Views are blended, so you may see a soft ghost between angles with few views. Add views or rows to reduce it.
-- The quad is a flat camera-facing billboard with no depth; where impostors overlap each other or real geometry
-  the intersection is a straight line.
+- The quad is a flat camera-facing billboard. With depth baked (the default for lit impostors) it intersects other
+  geometry correctly; without it, where impostors overlap each other or real geometry the intersection is a straight line.
 - Meant for the far distance. Keep the switch distance high enough that parallax isn't visible.
 - Baking needs a running renderer, so it works in the editor but not with `--headless`.
 - Alpha is cut at 50%, so thin leaves can look slightly thinner in the distance.
@@ -83,4 +103,5 @@ than the exact shadow they cast. Either way:
 
 ```bash
 xvfb-run -a godot --path . --rendering-method forward_plus -s res://tests/run_impostor_tests.gd
+xvfb-run -a godot --path . --rendering-method forward_plus -s res://tests/run_impostor_depth_tests.gd
 ```

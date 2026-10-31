@@ -13,9 +13,16 @@ uniform float min_elevation = 0.17;
 uniform float max_elevation = 0.96;
 uniform vec3 center = vec3(0.0);
 uniform vec4 tint : source_color = vec4(1.0);
+uniform sampler2D extra_atlas : filter_linear_mipmap, repeat_disable;  // red: depth, green: ambient occlusion
+uniform bool use_extra = false;
+uniform bool vertex_depth = false;  // Push the (subdivided) quad's vertices to the baked surface.
+uniform float depth_range = 1.0;
+uniform float ao_strength = 1.0;
+uniform float ao_light_affect = 0.4;
 
 varying flat vec4 v_cell;
 varying flat vec2 v_weight;
+varying float v_push;  // How far the vertex was moved towards the camera, in world meters.
 
 void vertex() {
 	mat4 m = MODEL_MATRIX;
@@ -24,8 +31,6 @@ void vertex() {
 	vec3 right = INV_VIEW_MATRIX[0].xyz;
 	vec3 up = INV_VIEW_MATRIX[1].xyz;
 	vec3 world_pos = world_center + (right * VERTEX.x + up * VERTEX.y) * s;
-	// Lighting and shadows use VERTEX, so put the billboarded corner there (in model space; the engine transforms it).
-	VERTEX = (inverse(m) * vec4(world_pos, 1.0)).xyz;
 
 	vec3 cam_local = (inverse(m) * vec4(INV_VIEW_MATRIX[3].xyz, 1.0)).xyz;
 	vec3 d = cam_local - center;
@@ -51,6 +56,29 @@ void vertex() {
 	}
 	v_cell = vec4(i0, i1, j0, j1);
 	v_weight = vec2(t, u);
+
+	v_push = 0.0;
+	if (use_extra && vertex_depth) {
+		// Where the surface really is at this vertex, for shadow lookups: the baked depth, blended like the colors.
+		vec2 cells = vec2(float(views), float(rows));
+		vec4 e00 = textureLod(extra_atlas, (vec2(i0, j0) + UV) / cells, 0.0);
+		vec4 e10 = textureLod(extra_atlas, (vec2(i1, j0) + UV) / cells, 0.0);
+		vec4 e01 = textureLod(extra_atlas, (vec2(i0, j1) + UV) / cells, 0.0);
+		vec4 e11 = textureLod(extra_atlas, (vec2(i1, j1) + UV) / cells, 0.0);
+		float cover00 = textureLod(atlas, (vec2(i0, j0) + UV) / cells, 0.0).a * (1.0 - t) * (1.0 - u);
+		float cover10 = textureLod(atlas, (vec2(i1, j0) + UV) / cells, 0.0).a * t * (1.0 - u);
+		float cover01 = textureLod(atlas, (vec2(i0, j1) + UV) / cells, 0.0).a * (1.0 - t) * u;
+		float cover11 = textureLod(atlas, (vec2(i1, j1) + UV) / cells, 0.0).a * t * u;
+		float cover = cover00 + cover10 + cover01 + cover11;
+		if (cover > 0.5) {
+			float depth = (e00.r * cover00 + e10.r * cover10 + e01.r * cover01 + e11.r * cover11) / cover;
+			v_push = (depth - 0.5) * depth_range * s;
+			vec3 to_camera = normalize(INV_VIEW_MATRIX[3].xyz - world_pos);
+			world_pos += to_camera * v_push;
+		}
+	}
+	// Lighting and shadows use VERTEX, so put the billboarded corner there (in model space; the engine transforms it).
+	VERTEX = (inverse(m) * vec4(world_pos, 1.0)).xyz;
 }
 
 void fragment() {
@@ -81,6 +109,21 @@ void fragment() {
 	ALBEDO = rgb * tint.rgb;
 	ALPHA = a * tint.a;
 	ALPHA_SCISSOR_THRESHOLD = 0.5;
+	if (use_extra) {
+		vec4 x = (texture(extra_atlas, uv00) * w00 + texture(extra_atlas, uv10) * w10
+				+ texture(extra_atlas, uv01) * w01 + texture(extra_atlas, uv11) * w11) * inv;
+		float scale = length(MODEL_MATRIX[0].xyz);
+		// The real depth buffer value of the surface this pixel shows, so that the impostor intersects other
+		// geometry and other impostors correctly instead of being a flat plane.
+		vec3 dir = normalize(VERTEX);
+		vec3 exact = VERTEX + dir * v_push - dir * (x.r - 0.5) * depth_range * scale;
+		vec4 clip = PROJECTION_MATRIX * vec4(exact, 1.0);
+		DEPTH = clip.z / clip.w;
+		AO = mix(1.0, x.g, ao_strength);
+		AO_LIGHT_AFFECT = ao_light_affect;
+	} else {
+		DEPTH = FRAGCOORD.z;
+	}
 	NORMAL = normalize((VIEW_MATRIX * vec4(world_n, 0.0)).xyz);
 	ROUGHNESS = 1.0;
 	METALLIC = 0.0;

@@ -11,12 +11,26 @@ const SHADOW_SHADER := preload("impostor_shadow.gdshader")
 @export var atlas: Texture2D
 ## Object-space normals for the same views, so that the impostor can be lit. Without it the impostor is unlit.
 @export var normal_atlas: Texture2D
+## Per-pixel depth (red) and ambient occlusion (green) of the same views, for lit impostors.
+@export var extra_atlas: Texture2D
+## Depth that the red channel of [member extra_atlas] spans, in meters at the baked scale.
+@export var depth_range := 1.0
+## How strongly the baked ambient occlusion darkens the ambient light (0 = not at all).
+@export_range(0.0, 1.0) var ao_strength := 1.0
+## How much of the baked occlusion also darkens direct light (0..1). This stands in for self-shadowing inside the
+## object: leaves deep in a canopy get less sun even though no shadow of the sun is baked.
+@export_range(0.0, 1.0) var ao_light_affect := 0.4
 ## Light the impostor with the scene's lights (needs [member normal_atlas]).
 @export var lit := true
 ## Let shadows of other objects fall on the impostor (needs [member lit]). Off by default: a flat camera-facing quad
 ## would otherwise sit inside its own shadow, which is avoided by moving its shadow back along the light ray, and that
 ## cuts the lower part off the shadow it casts on the ground. With this off, the shadow it casts is exact.
 @export var receive_shadows := false
+## Subdivides the quad into this many cells per side and pushes its vertices to the baked surface, so shadows are looked
+## up by region instead of across one flat plane (0 = a single flat quad). Needs [member receive_shadows] and
+## [member extra_atlas]. The cost is 2 x n x n triangles per impostor: use it for a few important impostors
+## (buildings, large trees), not for thousands of instances.
+@export_range(0, 64) var receive_detail := 0
 @export_range(1, 64) var views := 12
 @export_range(1, 8) var rows := 2
 @export_range(0.0, 90.0, 0.1, "degrees") var min_elevation := 10.0
@@ -35,13 +49,21 @@ func create_material() -> ShaderMaterial:
 	else:
 		material.shader = SHADER
 	material.set_shader_parameter("atlas", atlas)
-	if use_light:
-		material.set_shader_parameter("normal_atlas", normal_atlas)
 	material.set_shader_parameter("views", views)
 	material.set_shader_parameter("rows", rows)
 	material.set_shader_parameter("min_elevation", deg_to_rad(min_elevation))
 	material.set_shader_parameter("max_elevation", deg_to_rad(max_elevation))
 	material.set_shader_parameter("center", center)
+	if use_light:
+		material.set_shader_parameter("normal_atlas", normal_atlas)
+		var has_extra := extra_atlas != null
+		material.set_shader_parameter("use_extra", has_extra)
+		if has_extra:
+			material.set_shader_parameter("extra_atlas", extra_atlas)
+			material.set_shader_parameter("depth_range", depth_range)
+			material.set_shader_parameter("ao_strength", ao_strength)
+			material.set_shader_parameter("ao_light_affect", ao_light_affect)
+			material.set_shader_parameter("vertex_depth", receive_shadows and receive_detail > 0)
 	return material
 
 
@@ -74,6 +96,9 @@ func create_shadow_material() -> ShaderMaterial:
 func create_mesh() -> QuadMesh:
 	var mesh := QuadMesh.new()
 	mesh.size = Vector2(quad_size, quad_size)
+	if receive_shadows and receive_detail > 0 and lit and extra_atlas != null:
+		mesh.subdivide_width = receive_detail - 1
+		mesh.subdivide_depth = receive_detail - 1
 	# The quad is moved in the shader, so tell the renderer where it really ends up.
 	mesh.custom_aabb = AABB(center - Vector3.ONE * quad_size, Vector3.ONE * quad_size * 2.0)
 	mesh.material = create_material()

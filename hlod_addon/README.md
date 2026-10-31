@@ -41,6 +41,7 @@ godot --headless --path . -s res://tests/run_origin_tests.gd
 godot --headless --path . -s res://tests/run_hitch_tests.gd
 godot --headless --path . -s res://tests/run_overlay_tests.gd
 xvfb-run -a godot --path . --rendering-method forward_plus -s res://tests/run_impostor_tests.gd   # needs a renderer
+xvfb-run -a godot --path . --rendering-method forward_plus -s res://tests/run_impostor_depth_tests.gd
 ```
 
 Tested on the Godot 4.8 beta only (software renderer for the rendering tests); the target is stock 4.3+.

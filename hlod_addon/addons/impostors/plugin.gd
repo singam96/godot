@@ -12,6 +12,7 @@ var _rows: SpinBox
 var _cell: OptionButton
 var _distance: SpinBox
 var _lit: CheckBox
+var _depth: CheckBox
 var _progress: AcceptDialog
 var _progress_bar: ProgressBar
 var _progress_label: Label
@@ -46,6 +47,11 @@ func _enter_tree() -> void:
 	_lit.text = "Lit (also bake normals)"
 	_lit.button_pressed = true
 	grid.add_child(_lit)
+	grid.add_child(Control.new())
+	_depth = CheckBox.new()
+	_depth.text = "Depth and ambient occlusion (Forward+)"
+	_depth.button_pressed = true
+	grid.add_child(_depth)
 	grid.add_child(Control.new())
 	_dialog.add_child(grid)
 	EditorInterface.get_base_control().add_child(_dialog)
@@ -129,6 +135,7 @@ func _bake() -> void:
 	settings.rows = int(_rows.value)
 	settings.cell_size = _cell.get_selected_id()
 	settings.bake_normals = _lit.button_pressed
+	settings.bake_depth_and_ao = _depth.button_pressed
 	settings.progress = _on_progress
 	_progress_bar.value = 0.0
 	_progress_label.text = "Preparing..."
