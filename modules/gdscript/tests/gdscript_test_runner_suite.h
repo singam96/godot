@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "../gdscript_analyzer.h"
 #include "../gdscript_cache.h"
 #include "../gdscript_parser.h"
 #include "gdscript_test_runner.h"
@@ -59,6 +60,65 @@ public:
 // TODO: Handle some cases failing on release builds. See: https://github.com/godotengine/godot/pull/88452
 #ifdef TOOLS_ENABLED
 TEST_SUITE("[Modules][GDScript]") {
+	TEST_CASE("Exported packed array defaults retain their declared types") {
+		const Variant::Type packed_types[] = {
+			Variant::PACKED_BYTE_ARRAY,
+			Variant::PACKED_INT32_ARRAY,
+			Variant::PACKED_INT64_ARRAY,
+			Variant::PACKED_FLOAT32_ARRAY,
+			Variant::PACKED_FLOAT64_ARRAY,
+			Variant::PACKED_STRING_ARRAY,
+			Variant::PACKED_VECTOR2_ARRAY,
+			Variant::PACKED_VECTOR3_ARRAY,
+			Variant::PACKED_COLOR_ARRAY,
+			Variant::PACKED_VECTOR4_ARRAY,
+		};
+		for (Variant::Type type : packed_types) {
+			INFO(Variant::get_type_name(type));
+			GDScriptParser parser;
+			const String source = vformat("extends Resource\n@export var value: %s = []\n", Variant::get_type_name(type));
+			REQUIRE(parser.parse(source, "res://packed_default_test.gd", false) == OK);
+			GDScriptAnalyzer analyzer(&parser);
+			REQUIRE(analyzer.analyze() == OK);
+			GDScriptParser::VariableNode *variable = nullptr;
+			for (const GDScriptParser::ClassNode::Member &member : parser.get_tree()->members) {
+				if (member.type == GDScriptParser::ClassNode::Member::VARIABLE) {
+					variable = member.variable;
+					break;
+				}
+			}
+			REQUIRE(variable != nullptr);
+			const Variant value = analyzer.make_variable_default_value(variable);
+			CHECK(value.get_type() == type);
+			Variant expected;
+			Callable::CallError error;
+			Variant::construct(type, expected, nullptr, 0, error);
+			REQUIRE(error.error == Callable::CallError::CALL_OK);
+			CHECK(value == expected);
+		}
+	}
+
+	TEST_CASE("Placeholder retains exported packed array overrides") {
+		GDScriptLanguage::get_singleton()->init();
+		Ref<GDScript> script = memnew(GDScript);
+		script->set_source_code("extends Resource\n@export var value: PackedStringArray = []\n");
+		ERR_PRINT_OFF;
+		const Error error = script->reload();
+		ERR_PRINT_ON;
+		REQUIRE(error == OK);
+		Ref<Resource> owner = memnew(Resource);
+		PlaceHolderScriptInstance *placeholder = script->placeholder_instance_create(owner.ptr());
+		REQUIRE(placeholder != nullptr);
+		owner->set_script_instance(placeholder);
+		PackedStringArray expected;
+		expected.push_back("one");
+		expected.push_back("two");
+		owner->set("value", expected);
+		const Variant actual = owner->get("value");
+		CHECK(actual.get_type() == Variant::PACKED_STRING_ARRAY);
+		CHECK(actual == Variant(expected));
+	}
+
 	TEST_CASE("Script compilation and runtime") {
 		bool print_filenames = OS::get_singleton()->get_cmdline_args().find("--print-filenames") != nullptr;
 		bool use_binary_tokens = OS::get_singleton()->get_cmdline_args().find("--use-binary-tokens") != nullptr;

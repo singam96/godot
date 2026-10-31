@@ -5724,6 +5724,19 @@ Variant GDScriptAnalyzer::make_variable_default_value(GDScriptParser::VariableNo
 		Variant initializer_value = make_expression_reduced_value(p_variable->initializer, is_initializer_value_reduced);
 		if (is_initializer_value_reduced) {
 			result = initializer_value;
+			const GDScriptParser::DataType &datatype = p_variable->type_constraint;
+			if (datatype.is_hard_type() && datatype.kind == GDScriptParser::DataType::BUILTIN && result.get_type() != Variant::NIL && result.get_type() != datatype.builtin_type && Variant::can_convert_strict(result.get_type(), datatype.builtin_type)) {
+				// Reduced literals retain their expression type (e.g. [] is an Array),
+				// but editor placeholders need the same typed defaults as runtime instances.
+				// Otherwise comparisons against packed-array overrides are invalid and the
+				// placeholder can silently discard the property's serialized value.
+				Variant converted;
+				const Variant *source = &result;
+				Callable::CallError error;
+				Variant::construct(datatype.builtin_type, converted, &source, 1, error);
+				ERR_FAIL_COND_V(error.error != Callable::CallError::CALL_OK, Variant());
+				result = converted;
+			}
 		}
 	} else {
 		GDScriptParser::DataType datatype = p_variable->type_constraint;

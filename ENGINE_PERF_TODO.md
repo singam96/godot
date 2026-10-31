@@ -3,6 +3,27 @@
 Engine-level changes (this fork), as opposed to the GDScript add-ons in `hlod_addon/`.
 Each item is committed with its own tests.
 
+## Compatibility fixes
+
+- [x] Preserve declared built-in types when reducing exported variable defaults.
+  A non-tool resource with `@export var value: PackedStringArray = []` previously
+  supplied a plain `Array` default to editor placeholders. Invalid cross-type
+  comparisons then discarded assigned packed-array values during binary resource
+  conversion on export. Reduced defaults now receive the same implicit conversion
+  as runtime assignments. This also covers the other packed-array types.
+  Native regressions: `--headless --test --test-case="*packed array*"` (two cases,
+  64 assertions); the unmodified analyzer failed 20 assertions across all ten types.
+  A fresh binary export made by the patched editor retains the resource values in
+  the original Windows debug template, without disabling binary conversion.
+  GDScript API tests pass 129 assertions. The broader language fixture run has three
+  identical failures with both patched and unmodified analyzers in the reduced
+  fallback-text-server test configuration (`confusable_identifier`,
+  `identifier_similar_to_keyword`, `warning_ignore_targets`); it is not a clean
+  full-suite result. Optimized editor/template builds and game adoption are tracked
+  separately from this focused fix.
+
+## Rendering and streaming
+
 - [x] **Directional shadow cascade caching** (Forward+).
   `rendering/lights_and_shadows/directional_shadow/cache_far_cascades` (+ `cache_margin`, `cache_max_age_frames`).
   Far cascades are rendered with a margin and reused while the camera stays inside it. Test: `hlod_addon/tests/run_shadow_cache_tests.gd`.
