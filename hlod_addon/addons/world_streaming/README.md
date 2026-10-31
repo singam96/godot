@@ -29,6 +29,11 @@ streamer below the node that gets shifted.
 - *Prewarm* draws each new cell once, tiny and off-screen, before showing it, so the renderer compiles what it
   needs ahead of time.
 
+- **FrameWorkQueue**: a node for your own spawning. `enqueue(callable, priority)` runs jobs within a time budget per
+  frame; a job that returns `true` is run again, so one long loop can be sliced.
+- **MaterialPrewarmer**: `await prewarm([scene, mesh, material])` draws the items once, tiny and off-screen with
+  lights and shadows on, for example on a loading screen.
+
 ## Collision and navigation
 
 - Put collision shapes in the cell scenes. They load and free with the cell.
@@ -42,4 +47,4 @@ streamer below the node that gets shifted.
 `update_now()`, `is_position_loaded(pos)`, `are_required_cells_loaded()`, `get_loaded_counts()`, `get_cell(coord, layer)`,
 `is_busy()`, and the signals `cell_loaded`, `cell_unloaded`, `required_area_ready`, `required_area_lost`.
 
-Tests: `godot --headless --path . -s res://tests/run_streaming_tests.gd`
+Tests: `godot --headless --path . -s res://tests/run_streaming_tests.gd` and `run_hitch_tests.gd` (prewarm needs a renderer).
