@@ -227,6 +227,7 @@ void TextureStreaming::register_project_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "rendering/textures/streaming/memory_budget_enabled"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/memory_budget_mb"), 512);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/max_ops_per_second"), 200);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/max_upload_mb_per_second", PROPERTY_HINT_RANGE, "0,16384,1,or_greater"), 128);
 
 	// Mip level settings: 0 = full resolution (best quality), higher = lower resolution
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/streaming/min_lod", PROPERTY_HINT_RANGE, "0,13,1"), 0);
@@ -243,6 +244,7 @@ TextureStreaming::TextureStreaming() {
 	// Load initial settings.
 	setting_streaming_is_enabled = GLOBAL_GET("rendering/textures/streaming/enabled");
 	setting_max_ops_per_second = GLOBAL_GET("rendering/textures/streaming/max_ops_per_second");
+	setting_max_upload_bytes_per_second = uint64_t(int(GLOBAL_GET("rendering/textures/streaming/max_upload_mb_per_second"))) * 1024ull * 1024ull;
 	setting_min_lod = uint8_t(CLAMP(int(GLOBAL_GET("rendering/textures/streaming/min_lod")), int(MIN_LOD_LEVEL), int(MAX_LOD_LEVEL)));
 	setting_max_lod = uint8_t(CLAMP(int(GLOBAL_GET("rendering/textures/streaming/max_lod")), int(MIN_LOD_LEVEL), int(MAX_LOD_LEVEL)));
 	setting_budget_mb = GLOBAL_GET("rendering/textures/streaming/memory_budget_mb");
@@ -269,6 +271,7 @@ TextureStreaming::~TextureStreaming() {
 
 void TextureStreaming::_on_settings_changed() {
 	setting_max_ops_per_second = GLOBAL_GET("rendering/textures/streaming/max_ops_per_second");
+	setting_max_upload_bytes_per_second = uint64_t(int(GLOBAL_GET("rendering/textures/streaming/max_upload_mb_per_second"))) * 1024ull * 1024ull;
 	setting_min_lod = uint8_t(CLAMP(int(GLOBAL_GET("rendering/textures/streaming/min_lod")), int(MIN_LOD_LEVEL), int(MAX_LOD_LEVEL)));
 	setting_max_lod = uint8_t(CLAMP(int(GLOBAL_GET("rendering/textures/streaming/max_lod")), int(MIN_LOD_LEVEL), int(MAX_LOD_LEVEL)));
 	setting_budget_mb = GLOBAL_GET("rendering/textures/streaming/memory_budget_mb");
@@ -826,6 +829,15 @@ void TextureStreaming::_do_texture_reload(RID p_state_rid) {
 		}
 	}
 
+	// Limit how many bytes of texture data are uploaded per second, so promotions do not
+	// land as large uploads in a single frame.
+	if (!is_flushing && setting_max_upload_bytes_per_second > 0) {
+		const uint64_t current_ticks = OS::get_singleton()->get_ticks_usec();
+		if (next_upload_ticks > current_ticks + 2000) {
+			OS::get_singleton()->delay_usec(next_upload_ticks - current_ticks);
+		}
+	}
+
 	uint8_t next_mip;
 	if (is_flushing) {
 		// During flush, jump directly to target mip level.
@@ -839,6 +851,12 @@ void TextureStreaming::_do_texture_reload(RID p_state_rid) {
 	// Perform the actual texture reload at the new mip level.
 	state->reload_callable.call(next_mip);
 	state->current_mip.store(next_mip, std::memory_order_relaxed);
+
+	if (!is_flushing && setting_max_upload_bytes_per_second > 0) {
+		// The new texture holds every mip from next_mip down, so that is what was uploaded.
+		const uint64_t cost_usec = state->get_bytes_at_mip(next_mip) * 1000000ull / setting_max_upload_bytes_per_second;
+		next_upload_ticks = MAX(next_upload_ticks, OS::get_singleton()->get_ticks_usec()) + cost_usec;
+	}
 
 	// If we haven't reached the target yet, requeue to keep stepping.
 	// Re-read fit_mip in case the processing thread updated it since we started.

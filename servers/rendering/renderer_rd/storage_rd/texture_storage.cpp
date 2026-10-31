@@ -2124,7 +2124,13 @@ void TextureStorage::texture_replace_compatible(RID p_texture, RID p_by_texture)
 	Vector<RID> proxies_to_update = tex->proxies;
 	Vector<RID> proxies_to_redirect = by_tex->proxies;
 
+	// Keep the streaming state attached across the swap: a material updated between this call and a
+	// separate re-attach would otherwise not report the texture to the streaming system.
+	RID streaming_state = tex->streaming_state;
+
 	*tex = *by_tex;
+
+	tex->streaming_state = streaming_state;
 
 	tex->proxies = proxies_to_update; //restore proxies, so they can be updated
 

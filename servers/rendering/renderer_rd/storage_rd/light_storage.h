@@ -451,6 +451,7 @@ private:
 		int size = 0;
 		bool use_16_bits = true;
 		int current_light = 0;
+		uint32_t generation = 1;
 	} directional_shadow;
 
 	/* SHADOW CUBEMAPS */
@@ -1176,6 +1177,7 @@ public:
 	virtual void directional_shadow_atlas_set_size(int p_size, bool p_16_bits = true) override;
 	virtual int get_directional_light_shadow_size(RID p_light_instance) override;
 	virtual void set_directional_shadow_count(int p_count) override;
+	virtual uint32_t directional_shadow_get_generation() const override { return directional_shadow.generation; }
 
 	Rect2i get_directional_shadow_rect();
 	void update_directional_shadow_atlas();

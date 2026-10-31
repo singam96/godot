@@ -214,4 +214,8 @@ public:
 	virtual void directional_shadow_atlas_set_size(int p_size, bool p_16_bits = true) = 0;
 	virtual int get_directional_light_shadow_size(RID p_light_instance) = 0;
 	virtual void set_directional_shadow_count(int p_count) = 0;
+
+	// Incremented whenever the directional shadow atlas contents can no longer be trusted
+	// (re-created or resized), so cached cascades must be rendered again.
+	virtual uint32_t directional_shadow_get_generation() const { return 0; }
 };

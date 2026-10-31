@@ -420,6 +420,7 @@ private:
 	uint8_t setting_min_lod = MIN_LOD_LEVEL; // Best quality mip level - 0 = full resolution
 	uint8_t setting_max_lod = 3; // Worst quality mip level - 3 ≈ 128px for 8K texture
 	uint32_t setting_max_ops_per_second = 500; // 60 fps would be ~8 ops/frame
+	uint64_t setting_max_upload_bytes_per_second = 0; // 0 = unlimited
 	uint64_t setting_inactivity_decay_rate_ms = 5000; // Time per mip level of decay (ms)
 	uint32_t setting_budget_mb_override = UINT32_MAX;
 	uint8_t setting_min_lod_override = UINT8_MAX;
@@ -514,6 +515,7 @@ private:
 	void _texture_remove_finalize(RID p_state_rid);
 
 	uint64_t next_io_op_ticks = 0;
+	uint64_t next_upload_ticks = 0; // When the byte budget allows the next upload.
 	std::atomic<uint64_t> texture_streaming_total_memory = 0;
 
 	void _feedback_handle_data(const PackedByteArray &p_array, RID p_buffer);

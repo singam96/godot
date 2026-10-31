@@ -700,6 +700,28 @@ public:
 		bool uses_projector = false;
 		bool uses_softshadow = false;
 
+		// Directional shadow cascades that are rendered with a margin and reused between frames
+		// (see rendering/lights_and_shadows/directional_shadow/cache_far_cascades).
+		struct CascadeCache {
+			bool valid = false;
+			uint64_t view_id = 0;
+			uint64_t frame_rendered = 0;
+			uint32_t atlas_generation = 0;
+			int shadow_index = 0;
+			int shadow_count = 0;
+			int splits = 0;
+			real_t texture_size = 0;
+			Basis light_basis;
+			// Window covered by the cached shadow map, in light space.
+			real_t x_min = 0, x_max = 0, y_min = 0, y_max = 0, z_min = 0, z_max = 0;
+			Projection projection;
+			Transform3D transform;
+			real_t zfar = 0;
+			real_t shadow_texel_size = 0;
+			real_t bias_scale = 0;
+			Vector2 uv_scale;
+		} cascade_cache[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+
 		HashSet<Instance *> geometries;
 
 		Instance *baked_light = nullptr;
@@ -1082,7 +1104,7 @@ public:
 	_FORCE_INLINE_ void _update_instance_lightmap_captures(Instance *p_instance) const;
 	void _unpair_instance(Instance *p_instance);
 
-	void _light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect);
+	void _light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, uint64_t p_view_id, int p_shadow_count);
 
 	_FORCE_INLINE_ bool _light_instance_update_shadow(Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, RID p_shadow_atlas, Scenario *p_scenario, float p_screen_mesh_lod_threshold, uint32_t p_visible_layers = 0xFFFFFF);
 
@@ -1104,8 +1126,10 @@ public:
 				real_t bias_scale;
 				real_t range_begin;
 				Vector2 uv_scale;
+				bool reuse = false; // Keep the cached shadow map instead of rendering this cascade.
 
 			} cascades[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES]; //max 4 cascades
+			bool cache_active = false;
 			uint32_t cascade_count;
 
 		} shadows[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];

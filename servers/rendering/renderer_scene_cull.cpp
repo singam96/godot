@@ -2175,7 +2175,7 @@ void RendererSceneCull::_update_instance_lightmap_captures(Instance *p_instance)
 	geom->geometry_instance->set_lightmap_capture(p_instance->lightmap_sh.ptr());
 }
 
-void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect) {
+void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, uint64_t p_view_id, int p_shadow_count) {
 	// For later tight culling, the light culler needs to know the details of the directional light.
 	light_culler->prepare_directional_light_begin(p_instance, p_shadow_index);
 
@@ -2227,8 +2227,29 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 	cull.shadows[p_shadow_index].light_instance = light->instance;
 	cull.shadows[p_shadow_index].caster_mask = RSG::light_storage->light_get_shadow_caster_mask(p_instance->base);
 
+	// Far cascades can be rendered with a margin and reused while the camera stays inside it.
+	int cache_far = 0;
+	real_t cache_margin = 0.25;
+	uint64_t cache_max_age = 8;
+	if (scene_render->directional_shadow_cache_supported() && splits >= 2) {
+		cache_far = CLAMP(int(GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/cache_far_cascades")), 0, splits - 1);
+		cache_margin = CLAMP(real_t(GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/cache_margin")), real_t(0.05), real_t(2.0));
+		cache_max_age = MAX(1, int(GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/cache_max_age_frames")));
+	}
+	cull.shadows[p_shadow_index].cache_active = cache_far > 0;
+	const uint64_t cache_frame = RSG::rasterizer->get_frame_number();
+	const uint32_t cache_generation = RSG::light_storage->directional_shadow_get_generation();
+	real_t soft_shadow_angle_tan = 0;
+	{
+		float angle = RSG::light_storage->light_get_param(p_instance->base, RSE::LIGHT_PARAM_SIZE);
+		if (angle > 0.0) {
+			soft_shadow_angle_tan = Math::tan(Math::deg_to_rad(angle));
+		}
+	}
+
 	for (int i = 0; i < splits; i++) {
 		RENDER_TIMESTAMP("Cull DirectionalLight3D, Split " + itos(i));
+		cull.shadows[p_shadow_index].cascades[i].reuse = false;
 
 		// setup a camera matrix for that range!
 		Projection camera_matrix;
@@ -2309,6 +2330,13 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 		real_t soft_shadow_expand = 0;
 		Vector3 center;
 
+		const bool cacheable = cache_far > 0 && i >= splits - cache_far;
+		InstanceLightData::CascadeCache &cache = light->cascade_cache[i];
+		bool reuse = false;
+		if (!cacheable) {
+			cache.valid = false;
+		}
+
 		{
 			//camera viewport stuff
 
@@ -2327,6 +2355,29 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 			}
 
 			radius *= texture_size / (texture_size - 2.0); //add a texel by each side
+
+			if (cacheable) {
+				// The cached shadow map covers a margin around what is needed now, and is kept
+				// while the receivers (this cascade's slice of the view) stay inside of it.
+				const real_t true_radius = radius;
+				radius *= 1.0 + cache_margin;
+				const real_t soft_needed = soft_shadow_angle_tan * (2.0 * true_radius + pancake_size);
+				const real_t xc = x_vec.dot(center);
+				const real_t yc = y_vec.dot(center);
+				const real_t zc = z_vec.dot(center);
+				reuse = cache.valid &&
+						cache.view_id == p_view_id &&
+						cache.atlas_generation == cache_generation &&
+						cache.shadow_index == p_shadow_index &&
+						cache.shadow_count == p_shadow_count &&
+						cache.splits == splits &&
+						cache.texture_size == texture_size &&
+						cache.light_basis == transform.basis &&
+						cache_frame - cache.frame_rendered < cache_max_age + uint64_t(i) &&
+						xc - true_radius - soft_needed >= cache.x_min && xc + true_radius + soft_needed <= cache.x_max &&
+						yc - true_radius - soft_needed >= cache.y_min && yc + true_radius + soft_needed <= cache.y_max &&
+						zc - true_radius >= cache.z_min && zc + true_radius + pancake_size <= cache.z_max;
+			}
 
 			z_min_cam = z_vec.dot(center) - radius;
 
@@ -2352,6 +2403,15 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 			x_min_cam = Math::snapped(x_vec.dot(center) - radius - soft_shadow_expand, unit);
 			y_max_cam = Math::snapped(y_vec.dot(center) + radius + soft_shadow_expand, unit);
 			y_min_cam = Math::snapped(y_vec.dot(center) - radius - soft_shadow_expand, unit);
+		}
+
+		if (cacheable) {
+			// Casters anywhere in the cached window are needed, not only around the receivers.
+			x_min = MIN(x_min, x_min_cam);
+			x_max = MAX(x_max, x_max_cam);
+			y_min = MIN(y_min, y_min_cam);
+			y_max = MAX(y_max, y_max_cam);
+			z_min = MIN(z_min, z_min_cam);
 		}
 
 		//now that we know all ranges, we can proceed to make the light frustum planes, for culling octree
@@ -2386,15 +2446,54 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 			ortho_transform.basis = transform.basis;
 			ortho_transform.origin = x_vec * (x_min_cam + half_x) + y_vec * (y_min_cam + half_y) + z_vec * z_max;
 
-			cull.shadows[p_shadow_index].cascades[i].frustum = Frustum(light_frustum_planes);
-			cull.shadows[p_shadow_index].cascades[i].projection = ortho_camera;
-			cull.shadows[p_shadow_index].cascades[i].transform = ortho_transform;
-			cull.shadows[p_shadow_index].cascades[i].zfar = z_max - z_min_cam;
-			cull.shadows[p_shadow_index].cascades[i].split = distances[i + 1];
-			cull.shadows[p_shadow_index].cascades[i].shadow_texel_size = radius * 2.0 / texture_size;
-			cull.shadows[p_shadow_index].cascades[i].bias_scale = (z_max - z_min_cam);
-			cull.shadows[p_shadow_index].cascades[i].range_begin = z_max - z_vec.dot(p_cam_transform.origin);
-			cull.shadows[p_shadow_index].cascades[i].uv_scale = uv_scale;
+			Cull::Shadow::Cascade &out = cull.shadows[p_shadow_index].cascades[i];
+			out.split = distances[i + 1];
+			out.reuse = reuse;
+
+			if (reuse) {
+				// Same shadow map and matrices as when it was rendered. Only what depends on the
+				// current camera is refreshed.
+				out.projection = cache.projection;
+				out.transform = cache.transform;
+				out.zfar = cache.zfar;
+				out.shadow_texel_size = cache.shadow_texel_size;
+				out.bias_scale = cache.bias_scale;
+				out.range_begin = cache.z_max - z_vec.dot(p_cam_transform.origin);
+				out.uv_scale = cache.uv_scale;
+			} else {
+				out.frustum = Frustum(light_frustum_planes);
+				out.projection = ortho_camera;
+				out.transform = ortho_transform;
+				out.zfar = z_max - z_min_cam;
+				out.shadow_texel_size = radius * 2.0 / texture_size;
+				out.bias_scale = (z_max - z_min_cam);
+				out.range_begin = z_max - z_vec.dot(p_cam_transform.origin);
+				out.uv_scale = uv_scale;
+
+				cache.valid = cacheable;
+				if (cacheable) {
+					cache.view_id = p_view_id;
+					cache.frame_rendered = cache_frame;
+					cache.atlas_generation = cache_generation;
+					cache.shadow_index = p_shadow_index;
+					cache.shadow_count = p_shadow_count;
+					cache.splits = splits;
+					cache.texture_size = texture_size;
+					cache.light_basis = transform.basis;
+					cache.x_min = x_min_cam;
+					cache.x_max = x_max_cam;
+					cache.y_min = y_min_cam;
+					cache.y_max = y_max_cam;
+					cache.z_min = z_min_cam;
+					cache.z_max = z_max;
+					cache.projection = ortho_camera;
+					cache.transform = ortho_transform;
+					cache.zfar = out.zfar;
+					cache.shadow_texel_size = out.shadow_texel_size;
+					cache.bias_scale = out.bias_scale;
+					cache.uv_scale = uv_scale;
+				}
+			}
 		}
 	}
 }
@@ -3266,6 +3365,9 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 			for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
 				for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
+					if (cull_data.cull->shadows[j].cascades[k].reuse) {
+						continue; // The cached shadow map of this cascade is kept as it is.
+					}
 					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
 						continue;
 					}
@@ -3412,7 +3514,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		RSG::light_storage->set_directional_shadow_count(lights_with_shadow.size());
 
 		for (int i = 0; i < lights_with_shadow.size(); i++) {
-			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
+			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_reflection_probe.is_valid() ? p_reflection_probe.get_id() : p_viewport.get_id(), lights_with_shadow.size());
 		}
 	}
 
@@ -3515,6 +3617,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				}
 				render_shadow_data[max_shadows_used].light = cull.shadows[i].light_instance;
 				render_shadow_data[max_shadows_used].pass = j;
+				render_shadow_data[max_shadows_used].skip_render = c.reuse;
+				render_shadow_data[max_shadows_used].region_clear = cull.shadows[i].cache_active;
 				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
 				max_shadows_used++;
 			}
@@ -4549,6 +4653,9 @@ RendererSceneCull::RendererSceneCull() {
 
 	light_culler = memnew(RenderingLightCuller);
 
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_far_cascades", PROPERTY_HINT_RANGE, "0,3,1"), 2);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/directional_shadow/cache_margin", PROPERTY_HINT_RANGE, "0.05,2.0,0.01"), 0.25);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/cache_max_age_frames", PROPERTY_HINT_RANGE, "1,240,1"), 8);
 	bool tighter_caster_culling = GLOBAL_DEF("rendering/lights_and_shadows/tighter_shadow_caster_culling", true);
 	light_culler->set_caster_culling_active(tighter_caster_culling);
 	light_culler->set_light_culling_active(tighter_caster_culling);

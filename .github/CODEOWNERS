@@ -6,6 +6,8 @@
 
 /.github/                                     @godotengine/buildsystem
 /*                                            @godotengine/buildsystem
+/hlod_addon/                                  @singam96
+/hlod_addon/tests/                            @singam96 @godotengine/tests
 
 # Core
 
