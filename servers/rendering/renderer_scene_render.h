@@ -275,6 +275,9 @@ public:
 
 	virtual RID voxel_gi_instance_create(RID p_voxel_gi) = 0;
 	virtual void voxel_gi_instance_set_transform_to_data(RID p_probe, const Transform3D &p_xform) = 0;
+	// True if the renderer can reuse directional shadow cascades between frames (RenderShadowData::skip_render).
+	virtual bool directional_shadow_cache_supported() const { return false; }
+
 	virtual bool voxel_gi_needs_update(RID p_probe) const = 0;
 	virtual void voxel_gi_update(RID p_probe, bool p_update_light_instances, const Vector<RID> &p_light_instances, const PagedArray<RenderGeometryInstance *> &p_dynamic_objects) = 0;
 
@@ -284,6 +287,10 @@ public:
 		RID light;
 		int pass = 0;
 		PagedArray<RenderGeometryInstance *> instances;
+		// Directional cascade caching: the cascade keeps last frame's shadow map (not rendered again),
+		// and the atlas is cleared per rendered region instead of as a whole.
+		bool skip_render = false;
+		bool region_clear = false;
 	};
 
 	struct RenderSDFGIData {

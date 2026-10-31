@@ -3188,6 +3188,16 @@
 		<member name="rendering/lights_and_shadows/directional_shadow/16_bits" type="bool" setter="" getter="" default="true">
 			Use 16 bits for the directional shadow depth map. Enabling this results in shadows having less precision and may result in shadow acne, but can lead to performance improvements on some devices.
 		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_far_cascades" type="int" setter="" getter="" default="0">
+			Number of the farthest [DirectionalLight3D] shadow cascades that are kept between frames instead of being rendered every frame. [code]0[/code] disables caching and renders all cascades every frame. A cached cascade is rendered with a margin (see [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_margin]) and reused until the part of the view it covers leaves that margin, its light changes, or [member ProjectSettings.rendering/lights_and_shadows/directional_shadow/cache_max_age_frames] frames have passed. Shadows of objects that move inside a cached cascade can therefore be out of date by up to that many frames. The nearest cascade is never cached.
+			Only supported by the Forward+ renderer.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_margin" type="float" setter="" getter="" default="0.25">
+			How much larger, relative to its radius, a cached shadow cascade is rendered. A larger margin keeps the cascade valid for longer while the camera moves, at the cost of shadow resolution in that cascade.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/cache_max_age_frames" type="int" setter="" getter="" default="8">
+			Maximum number of frames a cached shadow cascade is reused before it is rendered again, so moving shadow casters are picked up. Farther cascades may be kept one frame longer per cascade index.
+		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/size" type="int" setter="" getter="" default="4096">
 			The directional shadow's size in pixels. Higher values will result in sharper shadows, at the cost of performance. The value is rounded up to the nearest power of 2.
 		</member>
