@@ -1,0 +1,10 @@
+config_version=5
+
+[application]
+
+config/name="HLOD add-on"
+config/features=PackedStringArray("4.3")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/hlod/plugin.cfg")
