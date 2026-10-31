@@ -1,0 +1,258 @@
+name: 📦 Release
+# Builds the editor and the export templates for Linux and Windows on every push to the default branch
+# and publishes them as a GitHub pre-release.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Releases must not overwrite each other, and a release should finish once it started.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Optimised, no debug symbols (they are huge). No LTO, to keep memory use and build time down.
+  SCONS_FLAGS: >-
+    optimize=speed
+    debug_symbols=no
+    module_text_server_fb_enabled=yes
+  PYTHONIOENCODING: utf8
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      title: ${{ steps.v.outputs.title }}
+      version-txt: ${{ steps.v.outputs.version-txt }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Compute the version
+        id: v
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import os
+          ns = {}
+          exec(open("version.py").read(), ns)
+          base = "%d.%d" % (ns["major"], ns["minor"])
+          if ns["patch"]:
+              base += ".%d" % ns["patch"]
+          status = ns["status"]
+          run = os.environ["GITHUB_RUN_NUMBER"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          print("tag=v%s-%s.build%s" % (base, status, run))
+          print("title=%s %s %s (build %s)" % (repo, base, status, run))
+          # What the export template installer compares with the editor's version.
+          print("version-txt=%s.%s.custom_build" % (base, status))
+          EOF
+
+  build:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux editor
+            runs-on: ubuntu-24.04
+            platform: linuxbsd
+            target: editor
+            cache-name: release-linux-editor
+            artifact: linux-editor
+          - name: Linux template release
+            runs-on: ubuntu-24.04
+            platform: linuxbsd
+            target: template_release
+            cache-name: release-linux-template-release
+            artifact: linux-template-release
+          - name: Linux template debug
+            runs-on: ubuntu-24.04
+            platform: linuxbsd
+            target: template_debug
+            cache-name: release-linux-template-debug
+            artifact: linux-template-debug
+          - name: Windows editor
+            runs-on: windows-latest
+            platform: windows
+            target: editor
+            cache-name: release-windows-editor
+            artifact: windows-editor
+          - name: Windows template release
+            runs-on: windows-latest
+            platform: windows
+            target: template_release
+            cache-name: release-windows-template-release
+            artifact: windows-template-release
+          - name: Windows template debug
+            runs-on: windows-latest
+            platform: windows
+            target: template_debug
+            cache-name: release-windows-template-debug
+            artifact: windows-template-debug
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Linux dependencies
+        if: matrix.platform == 'linuxbsd'
+        run: |
+          sudo apt-get update
+          sudo apt-get install libwayland-bin
+
+      - name: Restore build cache
+        uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: ${{ matrix.cache-name }}
+        continue-on-error: true
+
+      - name: Setup Python and SCons
+        uses: ./.github/actions/godot-deps
+
+      # The same optional Windows SDKs the regular CI builds use. A failed download builds without them.
+      - name: Download Direct3D 12 SDK components
+        if: matrix.platform == 'windows'
+        shell: sh
+        id: d3d12-sdk
+        run: |
+          if python ./misc/scripts/install_d3d12_sdk_windows.py; then
+            echo "D3D12_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Direct3D 12 SDK installation failed, building without Direct3D 12 support."
+            echo "D3D12_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+        continue-on-error: true
+
+      - name: Download pre-built ANGLE
+        if: matrix.platform == 'windows'
+        shell: sh
+        id: angle-sdk
+        run: |
+          if python ./misc/scripts/install_angle.py; then
+            echo "ANGLE_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANGLE SDK installation failed, building without ANGLE support."
+            echo "ANGLE_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download pre-built AccessKit
+        if: matrix.platform == 'windows'
+        shell: sh
+        id: accesskit-sdk
+        run: |
+          if python ./misc/scripts/install_accesskit.py; then
+            echo "ACCESSKIT_ENABLED=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::AccessKit SDK installation failed, building without AccessKit support."
+            echo "ACCESSKIT_ENABLED=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compile (Linux)
+        if: matrix.platform == 'linuxbsd'
+        shell: sh
+        run: |
+          # Export templates must not contain editor code.
+          if [ "${{ matrix.target }}" != "editor" ]; then rm -rf editor; fi
+          scons platform=linuxbsd target=${{ matrix.target }} ${{ env.SCONS_FLAGS }} "cache_path=${{ github.workspace }}/.scons_cache/" redirect_build_objects=no
+          ls -l bin/
+
+      - name: Compile (Windows)
+        if: matrix.platform == 'windows'
+        shell: sh
+        run: |
+          if [ "${{ matrix.target }}" != "editor" ]; then rm -rf editor; fi
+          scons platform=windows target=${{ matrix.target }} ${{ env.SCONS_FLAGS }} d3d12=${{ steps.d3d12-sdk.outputs.D3D12_ENABLED }} accesskit=${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }} angle=${{ steps.angle-sdk.outputs.ANGLE_ENABLED }} "cache_path=${{ github.workspace }}/.scons_cache/" redirect_build_objects=no
+          ls -l bin/
+
+      - name: Save build cache
+        uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: ${{ matrix.cache-name }}
+        continue-on-error: true
+
+      - name: Smoke test
+        shell: sh
+        run: |
+          # Templates do not run on their own, the editor does.
+          if [ "${{ matrix.target }}" = "editor" ]; then
+            for f in bin/godot.*editor*; do
+              case "$f" in *.exe|*x86_64) "$f" --version; break ;; esac
+            done
+          fi
+
+      - name: Prepare artifact
+        shell: sh
+        run: |
+          rm -rf bin/build_deps bin/obj
+          rm -f bin/*.exp bin/*.lib bin/*.pdb bin/*.a
+
+      - name: Upload artifact
+        uses: ./.github/actions/upload-artifact
+        with:
+          name: ${{ matrix.artifact }}
+
+  release:
+    name: Publish release
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Package
+        shell: bash
+        env:
+          VERSION_TXT: ${{ needs.version.outputs.version-txt }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -maxdepth 2 | sort
+
+          # Editors: one zip per platform.
+          for platform in linux windows; do
+            (cd "artifacts/${platform}-editor" && chmod +x godot.* 2>/dev/null || true; zip -r "$GITHUB_WORKSPACE/dist/godot-${TAG}-${platform}-editor.zip" .)
+          done
+
+          # Export templates, named the way the editor's "Install from file" expects.
+          mkdir -p tpz/templates
+          echo "$VERSION_TXT" > tpz/templates/version.txt
+          for kind in release debug; do
+            src="artifacts/linux-template-${kind}"
+            cp "$src"/godot.linuxbsd.template_${kind}.x86_64 "tpz/templates/linux_${kind}.x86_64"
+            src="artifacts/windows-template-${kind}"
+            cp "$src"/godot.windows.template_${kind}.x86_64.exe "tpz/templates/windows_${kind}_x86_64.exe"
+            if [ -f "$src/godot.windows.template_${kind}.x86_64.console.exe" ]; then
+              cp "$src/godot.windows.template_${kind}.x86_64.console.exe" "tpz/templates/windows_${kind}_x86_64_console.exe"
+            fi
+          done
+          chmod +x tpz/templates/linux_*
+          (cd tpz && zip -r "$GITHUB_WORKSPACE/dist/godot-${TAG}-export-templates.tpz" templates)
+
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          TITLE: ${{ needs.version.outputs.title }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$TITLE" \
+            --prerelease \
+            --generate-notes \
+            --notes "Custom build of this fork, not an official Godot release. Includes the editor and export templates for Linux and Windows. Install the .tpz with Editor > Manage Export Templates > Install From File."
