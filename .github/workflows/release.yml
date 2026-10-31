@@ -1,10 +1,15 @@
 name: 📦 Release
 # Builds the editor and the export templates for Linux and Windows on every push to the default branch
-# and publishes them as a GitHub pre-release.
+# and publishes them as a GitHub pre-release. Manual runs build artifacts only by default.
 on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a pre-release after the builds pass
+        type: boolean
+        default: false
 
 # Releases must not overwrite each other, and a release should finish once it started.
 concurrency:
@@ -16,6 +21,10 @@ env:
   SCONS_FLAGS: >-
     optimize=speed
     debug_symbols=no
+    lto=none
+    dev_build=no
+    tests=no
+    strict_checks=no
     module_text_server_fb_enabled=yes
   PYTHONIOENCODING: utf8
 
@@ -194,6 +203,45 @@ jobs:
           rm -rf bin/build_deps bin/obj
           rm -f bin/*.exp bin/*.lib bin/*.pdb bin/*.a
 
+      - name: Record build provenance
+        shell: python
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_TARGET: ${{ matrix.target }}
+          D3D12_ENABLED: ${{ steps.d3d12-sdk.outputs.D3D12_ENABLED }}
+          ANGLE_ENABLED: ${{ steps.angle-sdk.outputs.ANGLE_ENABLED }}
+          ACCESSKIT_ENABLED: ${{ steps.accesskit-sdk.outputs.ACCESSKIT_ENABLED }}
+        run: |
+          import hashlib, json, os, platform, subprocess, sys
+          from pathlib import Path
+          import SCons
+          binary_dir = Path("bin")
+          files = {}
+          for path in sorted(binary_dir.iterdir()):
+              if path.is_file() and path.name != "build-provenance.json":
+                  with path.open("rb") as stream:
+                      files[path.name] = hashlib.file_digest(stream, "sha256").hexdigest()
+          report = {
+              "commit": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "platform": os.environ["BUILD_PLATFORM"], "target": os.environ["BUILD_TARGET"],
+              "scons_flags": os.environ["SCONS_FLAGS"], "scons_version": SCons.__version__,
+              "optional_windows_sdks": {key: os.environ.get(key, "") for key in
+                  ["D3D12_ENABLED", "ANGLE_ENABLED", "ACCESSKIT_ENABLED"]},
+              "runner_image": os.environ.get("ImageOS"), "runner_image_version": os.environ.get("ImageVersion"),
+              "system": platform.platform(), "python": sys.version, "files_sha256": files,
+          }
+          if sys.platform == "win32":
+              locator = Path(os.environ["ProgramFiles(x86)"]) / "Microsoft Visual Studio/Installer/vswhere.exe"
+              installation = subprocess.check_output([str(locator), "-latest", "-products", "*", "-requires",
+                  "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], text=True).strip()
+              report["msvc_default_tools_version"] = (Path(installation) /
+                  "VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").read_text().strip()
+          else:
+              report["compiler"] = subprocess.check_output(["g++", "--version"], text=True).splitlines()[0]
+          (binary_dir / "build-provenance.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
       - name: Upload artifact
         uses: ./.github/actions/upload-artifact
         with:
@@ -201,6 +249,7 @@ jobs:
 
   release:
     name: Publish release
+    if: github.event_name == 'push' || inputs.publish_release
     needs: [version, build]
     runs-on: ubuntu-24.04
     permissions:
@@ -232,8 +281,10 @@ jobs:
           for kind in release debug; do
             src="artifacts/linux-template-${kind}"
             cp "$src"/godot.linuxbsd.template_${kind}.x86_64 "tpz/templates/linux_${kind}.x86_64"
+            cp "$src/build-provenance.json" "tpz/templates/linux_${kind}_build-provenance.json"
             src="artifacts/windows-template-${kind}"
             cp "$src"/godot.windows.template_${kind}.x86_64.exe "tpz/templates/windows_${kind}_x86_64.exe"
+            cp "$src/build-provenance.json" "tpz/templates/windows_${kind}_build-provenance.json"
             if [ -f "$src/godot.windows.template_${kind}.x86_64.console.exe" ]; then
               cp "$src/godot.windows.template_${kind}.x86_64.console.exe" "tpz/templates/windows_${kind}_x86_64_console.exe"
             fi

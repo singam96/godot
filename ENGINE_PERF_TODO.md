@@ -45,3 +45,16 @@ Each item is committed with its own tests.
 All three are on by default: `cache_far_cascades` = 2, `gpu_culling_min_instances` = 1000, `max_upload_mb_per_second` = 128.
 Set them to 0 to get the previous behavior. Cached shadow cascades can show a newly added or moved caster up to
 `cache_max_age_frames` frames late.
+
+## Reproducible editor/template candidates
+
+The Release workflow can build optimized Windows/Linux editors and both template
+types on a fixes branch without publishing: manually dispatch it with
+`publish_release=false` (the default for manual runs). Pushes to `master` retain
+the existing pre-release publishing behavior. An explicit manual
+`publish_release=true` also publishes after all six builds pass.
+
+Each binary artifact includes `build-provenance.json`: source/run identity,
+selected SCons and SDK flags, runner image, default compiler/toolset version and
+SHA-256 hashes. Packaged templates retain their per-target provenance too. Keep
+candidate build, compatibility and runtime-performance acceptance separate.
