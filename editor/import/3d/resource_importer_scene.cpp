@@ -40,7 +40,6 @@
 #include "editor/editor_node.h"
 #include "editor/import/3d/scene_import_settings.h"
 #include "editor/settings/editor_settings.h"
-#include "scene/3d/hlod_cluster_3d.h"
 #include "scene/3d/importer_mesh_instance_3d.h"
 #include "scene/3d/mesh_instance_3d.h"
 #include "scene/3d/navigation/navigation_region_3d.h"
@@ -297,9 +296,6 @@ bool ResourceImporterScene::get_option_visibility(const String &p_path, const St
 		return _scene_import_type == "ArrayMesh";
 	}
 	if (_scene_import_type == "PackedScene") {
-		if (p_option.begins_with("hlod/") && p_option != "hlod/enabled") {
-			return p_options.has("hlod/enabled") && bool(p_options["hlod/enabled"]);
-		}
 		if (p_option.begins_with("animation/")) {
 			if (p_option != "animation/import" && !bool(p_options["animation/import"])) {
 				return false;
@@ -309,11 +305,11 @@ bool ResourceImporterScene::get_option_visibility(const String &p_path, const St
 		if (p_option == "animation/import") { // Option ignored, animation always imported.
 			return false;
 		}
-		if (p_option == "nodes/root_type" || p_option == "nodes/root_name" || p_option == "nodes/root_script" || p_option.begins_with("meshes/") || p_option.begins_with("skins/") || p_option.begins_with("hlod/")) {
+		if (p_option == "nodes/root_type" || p_option == "nodes/root_name" || p_option == "nodes/root_script" || p_option.begins_with("meshes/") || p_option.begins_with("skins/")) {
 			return false; // Nothing to do here for animations.
 		}
 	} else if (_scene_import_type == "MeshLibrary") {
-		if (p_option.begins_with("animation/") || p_option.begins_with("skins/") || p_option.begins_with("import_script/") || p_option.begins_with("hlod/")) {
+		if (p_option.begins_with("animation/") || p_option.begins_with("skins/") || p_option.begins_with("import_script/")) {
 			return false;
 		}
 		if (p_option.begins_with("nodes/")) {
@@ -2717,11 +2713,6 @@ void ResourceImporterScene::get_import_options(const String &p_path, List<Import
 	r_options->push_back(ImportOption(PropertyInfo(Variant::INT, "meshes/light_baking", PROPERTY_HINT_ENUM, "Disabled,Static,Static Lightmaps,Dynamic", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), 1));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::FLOAT, "meshes/lightmap_texel_size", PROPERTY_HINT_RANGE, "0.001,100,0.001"), 0.2));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "meshes/force_disable_compression"), false));
-	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "hlod/enabled", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), false));
-	r_options->push_back(ImportOption(PropertyInfo(Variant::FLOAT, "hlod/switch_distance", PROPERTY_HINT_RANGE, "0.01,4096,0.01,or_greater,suffix:m"), 50.0));
-	r_options->push_back(ImportOption(PropertyInfo(Variant::FLOAT, "hlod/simplify_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), 0.25));
-	r_options->push_back(ImportOption(PropertyInfo(Variant::FLOAT, "hlod/grid_cell_size", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), 0.0));
-	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "hlod/merge_materials"), true));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "skins/use_named_skins"), true));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "animation/import"), true));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::FLOAT, "animation/fps", PROPERTY_HINT_RANGE, "1,120,1"), 30));
@@ -2792,26 +2783,6 @@ Array ResourceImporterScene::_get_skinned_pose_transforms(ImporterMeshInstance3D
 	}
 
 	return skin_pose_transform_array;
-}
-
-Node *ResourceImporterScene::_generate_hlod(Node *p_root, Ref<Script> p_root_script, const HashMap<StringName, Variant> &p_options) {
-	// The root becomes an HLODCluster3D, which merges all the imported meshes below it into one proxy mesh.
-	if (!Object::cast_to<HLODCluster3D>(p_root)) {
-		p_root = _replace_node_with_type_and_script(p_root, "HLODCluster3D", p_root_script);
-	}
-	HLODCluster3D *cluster = Object::cast_to<HLODCluster3D>(p_root);
-	ERR_FAIL_NULL_V(cluster, p_root);
-
-	cluster->set_switch_distance(p_options["hlod/switch_distance"]);
-	cluster->set_simplify_ratio(p_options["hlod/simplify_ratio"]);
-	cluster->set_merge_materials(p_options["hlod/merge_materials"]);
-
-	const float grid_cell_size = p_options["hlod/grid_cell_size"];
-	const Error err = grid_cell_size > 0.0f ? cluster->build_grid(grid_cell_size) : cluster->generate_proxy();
-	if (err != OK) {
-		EditorNode::add_io_error(vformat(TTR("Could not generate the HLOD proxy mesh (error %d). Make sure the scene contains meshes."), (int)err));
-	}
-	return p_root;
 }
 
 Node *ResourceImporterScene::_generate_meshes(Node *p_node, const Dictionary &p_mesh_data, bool p_generate_lods, bool p_create_shadow_meshes, LightBakeMode p_light_bake_mode, float p_lightmap_texel_size, const Vector<uint8_t> &p_src_lightmap_cache, Vector<Vector<uint8_t>> &r_lightmap_caches) {
@@ -3471,10 +3442,6 @@ Error ResourceImporterScene::import(ResourceUID::ID p_source_id, const String &p
 	}
 
 	scene = _generate_meshes(scene, mesh_data, gen_lods, create_shadow_meshes, LightBakeMode(light_bake_mode), lightmap_texel_size, src_lightmap_cache, mesh_lightmap_caches);
-
-	if (_scene_import_type == "PackedScene" && p_options.has("hlod/enabled") && bool(p_options["hlod/enabled"])) {
-		scene = _generate_hlod(scene, root_script, p_options);
-	}
 
 	if (mesh_lightmap_caches.size()) {
 		Ref<FileAccess> f = FileAccess::open(p_source_file + ".unwrap_cache", FileAccess::WRITE);

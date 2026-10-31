@@ -44,4 +44,3 @@ xvfb-run -a godot --path . --rendering-method forward_plus -s res://tests/run_im
 ```
 
 Tested on the Godot 4.8 beta only (software renderer for the rendering tests); the target is stock 4.3+.
-The HLOD add-on's class `HLODCluster` replaces the `HLODCluster3D` node of the engine fork; don't enable both.

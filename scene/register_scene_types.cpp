@@ -244,7 +244,6 @@
 #include "scene/3d/fog_volume.h"
 #include "scene/3d/gpu_particles_3d.h"
 #include "scene/3d/gpu_particles_collision_3d.h"
-#include "scene/3d/hlod_cluster_3d.h"
 #include "scene/3d/ik_modifier_3d.h"
 #include "scene/3d/importer_mesh_instance_3d.h"
 #include "scene/3d/iterate_ik_3d.h"
@@ -655,7 +654,6 @@ void register_scene_types() {
 	MeshInstance3D::use_parent_skeleton_compat = GLOBAL_GET("animation/compatibility/default_parent_skeleton_in_mesh_instance_3d");
 #endif
 	GDREGISTER_CLASS(OccluderInstance3D);
-	GDREGISTER_CLASS(HLODCluster3D);
 	GDREGISTER_ABSTRACT_CLASS(Occluder3D);
 	GDREGISTER_CLASS(ArrayOccluder3D);
 	GDREGISTER_CLASS(QuadOccluder3D);
