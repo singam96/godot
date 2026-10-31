@@ -22,5 +22,5 @@ Each item is committed with its own tests.
 
 ## Defaults
 All three are on by default: `cache_far_cascades` = 2, `gpu_culling_min_instances` = 1000, `max_upload_mb_per_second` = 128.
-Set them to 0 to get the previous behaviour. Cached shadow cascades can show a newly added or moved caster up to
+Set them to 0 to get the previous behavior. Cached shadow cascades can show a newly added or moved caster up to
 `cache_max_age_frames` frames late.

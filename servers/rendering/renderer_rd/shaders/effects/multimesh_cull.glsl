@@ -32,7 +32,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	vec4 owner_row0; // Transform of the MultiMesh node, rows of a 3x4 matrix.
 	vec4 owner_row1;
 	vec4 owner_row2;
-	vec4 sphere; // Bounding sphere of one instance of the mesh, centre and radius.
+	vec4 sphere; // Bounding sphere of one instance of the mesh, center and radius.
 	uint instance_count;
 	uint stride_vec4; // Size of an instance in the buffer, in vec4.
 	uint surface_count;
@@ -58,7 +58,7 @@ void main() {
 	vec4 r1 = source.data[base + 1u];
 	vec4 r2 = source.data[base + 2u];
 
-	// Centre of the instance's bounding sphere in the MultiMesh's space, then in world space.
+	// Center of the instance's bounding sphere in the MultiMesh's space, then in world space.
 	vec3 c = params.sphere.xyz;
 	vec3 local_center = vec3(dot(r0.xyz, c) + r0.w, dot(r1.xyz, c) + r1.w, dot(r2.xyz, c) + r2.w);
 	vec3 o0 = params.owner_row0.xyz;

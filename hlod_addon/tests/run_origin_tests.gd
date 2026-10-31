@@ -45,13 +45,13 @@ func _init() -> void:
 	_check(shifter.offset_x == 0.0, "no offset")
 
 	print("shift when far")
-	var signalled := [Vector3.ZERO]
-	shifter.origin_shifted.connect(func(s): signalled[0] = s)
+	var signaled := [Vector3.ZERO]
+	shifter.origin_shifted.connect(func(s): signaled[0] = s)
 	player.position = Vector3(2300, 5, 4100)
 	var abs_before := shifter.get_absolute_position(player)
 	var tree_abs_before := shifter.get_absolute_position(tree_node)
 	shifter.check()
-	_check(signalled[0] == Vector3(-2500, 0, -4000), "shift is a multiple of the snap (%s)" % signalled[0])
+	_check(signaled[0] == Vector3(-2500, 0, -4000), "shift is a multiple of the snap (%s)" % signaled[0])
 	_check(player.position == Vector3(-200, 5, 100), "player is near the origin %s" % player.position)
 	_check(tree_node.position == Vector3(100, 0, -900), "other nodes moved by the same amount %s" % tree_node.position)
 	_check(rig.position == Vector3(-2500, 0, -4000), "extra nodes moved")

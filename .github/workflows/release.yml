@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Optimised, no debug symbols (they are huge). No LTO, to keep memory use and build time down.
+  # Optimized, no debug symbols (they are huge). No LTO, to keep memory use and build time down.
   SCONS_FLAGS: >-
     optimize=speed
     debug_symbols=no

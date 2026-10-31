@@ -2,7 +2,7 @@ shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_opaque;
 
 // Camera-facing impostor. The atlas holds `views` azimuth columns and `rows` elevation rows of the object, each
-// rendered from outside; the two nearest views of each axis are blended. Instance scale is honoured and the
+// rendered from outside; the two nearest views of each axis are blended. Instance scale is honored and the
 // instance rotation picks the view, so one mesh and material serve a whole MultiMesh.
 
 uniform sampler2D atlas : source_color, filter_linear_mipmap, repeat_disable;

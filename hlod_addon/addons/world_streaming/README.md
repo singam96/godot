@@ -48,7 +48,7 @@ streamer below the node that gets shifted.
 - Put collision shapes in the cell scenes. They load and free with the cell.
 - Add a **WorldGroundGate** node (streamer + body) to keep the player frozen until the ground around it has loaded.
   `WorldStreamer.is_position_loaded()` and the `required_area_ready` signal are there for your own logic.
-- Navigation: each cell has its own region. Regions of neighbouring cells connect where their edges are within the
+- Navigation: each cell has its own region. Regions of neighboring cells connect where their edges are within the
   navigation map's edge connection margin, so make sure the ground meshes of two cells meet at the cell border.
 
 ## API

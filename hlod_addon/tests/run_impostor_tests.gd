@@ -77,7 +77,7 @@ func _coverage(img: Image) -> int:
 	return n
 
 
-## Counts the grey ground pixels in shadow and their x range, seen from above. The test scene has a white ground at
+## Counts the gray ground pixels in shadow and their x range, seen from above. The test scene has a white ground at
 ## y = -1.5 and a shadow-casting sun.
 func _shadow_stats(subject: Node3D, camera: Camera3D) -> Array:
 	root.add_child(subject)

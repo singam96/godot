@@ -106,7 +106,7 @@ func create_mesh() -> QuadMesh:
 
 
 ## Builds a MultiMesh drawing one impostor per transform; give it to a MultiMeshInstance3D.
-## Instance scale and Y rotation are honoured, like for the real object.
+## Instance scale and Y rotation are honored, like for the real object.
 func create_multimesh(transforms: Array[Transform3D]) -> MultiMesh:
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
