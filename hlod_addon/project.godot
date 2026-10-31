@@ -7,4 +7,4 @@ config/features=PackedStringArray("4.3")
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/hlod/plugin.cfg", "res://addons/occluder_tools/plugin.cfg")
+enabled=PackedStringArray("res://addons/hlod/plugin.cfg", "res://addons/occluder_tools/plugin.cfg", "res://addons/impostors/plugin.cfg")
