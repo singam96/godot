@@ -22,6 +22,21 @@ Each item is committed with its own tests.
   full-suite result. Optimized editor/template builds and game adoption are tracked
   separately from this focused fix.
 
+## Build correctness
+
+- [x] Track object dependencies when linking programs/shared libraries against thin archives.
+  A changed object can leave a thin archive's content signature unchanged; incremental
+  MinGW editor builds then rebuilt the archive without relinking the executable.
+  The server reproduced this when advancing from `2ba5343` to `9d9771c4`: generated
+  version/object/archive changed while the executable retained the older source hash.
+  Linking helpers now depend on the thin archive's object nodes. The focused Python
+  regression changes a function body without changing symbols, checks both executable
+  and shared-library outputs, and verifies an unchanged build does not relink. Regular
+  archives are a control. Unmodified thin outputs incorrectly returned 1 after the
+  function changed to return 2; patched regular/thin tests both pass. Linux CI runs the
+  regression with current and legacy SCons jobs. Full server rebuild validation remains
+  separate; do not trust the earlier mislabeled `9d9771c4` server artifact.
+
 ## Rendering and streaming
 
 - [x] **Directional shadow cascade caching** (Forward+).

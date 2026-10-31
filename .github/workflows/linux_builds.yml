@@ -186,6 +186,10 @@ jobs:
         with:
           make-default: false
 
+      - name: Incremental archive link regression
+        if: matrix.godot-cpp || matrix.legacy-scons
+        run: python3 tests/python_build/test_thin_archive_linking.py
+
       - name: Compilation
         uses: ./.github/actions/godot-build
         with:

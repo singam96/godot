@@ -579,8 +579,21 @@ def precious_program(env, program, sources, **args):
     return program
 
 
+def _depend_on_thin_archive_objects(env, output):
+    if "--thin" not in env.get("ARFLAGS", []):
+        return
+
+    from SCons.Util import flatten
+
+    # Thin archives only store object paths and symbols. Their content signatures
+    # can stay unchanged when object code changes, so links must track the objects.
+    for library in flatten(env.get("LIBS", [])):
+        env.Depends(output, getattr(library, "sources", []))
+
+
 def add_shared_library(env, name, sources, **args):
     library = env.SharedLibrary(name, sources, **args)
+    _depend_on_thin_archive_objects(env, library)
     env.NoCache(library)
     return library
 
@@ -593,6 +606,7 @@ def add_library(env, name, sources, **args):
 
 def add_program(env, name, sources, **args):
     program = env.Program(name, sources, **args)
+    _depend_on_thin_archive_objects(env, program)
     env.NoCache(program)
     return program
 
