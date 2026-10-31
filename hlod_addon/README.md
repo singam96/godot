@@ -1,55 +1,46 @@
-# HLOD for Godot (add-on)
+# Open-world toolkit for Godot 4.3+
 
-Hierarchical level of detail for stock Godot 4.3+: merge a group of meshes into one cheap proxy that is shown from
-far away, and swap back to the real objects when the camera comes close. Pure GDScript, no GDExtension, no engine fork.
+Add-ons for large worlds, written in GDScript (no GDExtension, no engine fork). Copy the ones you need from
+`addons/` into your project and enable them in the Plugins settings. Each has its own README.
 
-## Install
+| Add-on | What it does |
+|---|---|
+| [`hlod`](addons/hlod/) | Merges clusters of meshes into one atlased, simplified proxy shown from far away; grids, streaming, import options |
+| [`occluder_tools`](addons/occluder_tools/) | Adds safe occluders to large solid meshes for occlusion culling |
+| [`impostors`](addons/impostors/) | Bakes billboard impostors of trees, props and clusters for the far distance |
+| [`world_streaming`](addons/world_streaming/) | Streams world cells with a frame budget; far cells, cell splitter, per-cell navigation, ground gate, work queue, prewarming |
+| [`foliage`](addons/foliage/) | Chunked MultiMesh scattering with real, impostor and cull levels |
+| [`origin_shift`](addons/origin_shift/) | Moves the world back to the origin and keeps 64-bit absolute coordinates |
+| [`perf_overlay`](addons/perf_overlay/) | Frame time, draw calls, triangles and streaming against budgets, with a hitch counter |
 
-Copy `addons/hlod/` into your project's `addons/` folder and enable **HLOD** in *Project > Project Settings > Plugins*.
+## How they fit together
 
-## Use
+```
+near            medium            far              very far
+real meshes --> HLOD proxy  -->  impostor  -->  culled
+(MultiMesh via foliage for repeated objects; occluders hide what is behind buildings)
 
-1. Add an **HLODCluster** node (a `Node3D`) and put your buildings, props or a whole scene below it.
-2. Select the cluster and press **Generate HLOD** in the 3D editor toolbar. A progress dialog shows the steps and
-   can be cancelled; the whole bake is one undo step.
-3. Set **Switch Distance**: beyond it the proxy is shown, closer the children are. **Switch Margin** adds hysteresis
-   so the swap doesn't flicker. **Fade Mode** (Forward+ only) cross-fades the two.
+world_streaming loads/frees the cells that hold all of this around the player;
+origin_shift keeps the player near the origin; perf_overlay shows what each frame costs.
+```
 
-What the proxy generation does:
+Not included on purpose: terrain (use the Terrain3D add-on), sky, weather and water (existing add-ons).
 
-- merges all visible `MeshInstance3D` and `MultiMeshInstance3D` descendants (every MultiMesh instance included),
-- bakes opaque `StandardMaterial3D`s (albedo colour/texture only) into one **material atlas** (`Merge Materials`),
-- removes **hidden faces** that no outside viewpoint can see (`Remove Hidden Faces`),
-- simplifies to `Simplify Ratio`. This uses `ImporterMesh.generate_lods`, whose levels halve the triangle count, so the
-  closest available level to your ratio is used.
+## Project in this folder
 
-Nested clusters work: an inner cluster's proxy is used instead of its children when the outer one is baked.
-
-### Big worlds
-
-- **`build_grid(cell_size)`** (script) sorts the children into a grid of nested clusters, each with its own proxy.
-  Cells use half the parent's switch distance.
-- **Streaming**: `store_detail_scene(path)` saves the children as a scene and removes them; at run time the cluster
-  loads them in a thread when the camera is within `switch + margin + Stream Load Margin` and frees them beyond
-  `Stream Unload Margin`.
-
-### Import
-
-In the import dock of a glTF/scene, the **Meshes > HLOD** options (`hlod/*`) wrap the imported scene in a cluster
-and generate the proxy (optionally a grid) during import.
-
-## Limits
-
-- Only opaque `StandardMaterial3D` with at most an albedo texture is atlased; other materials stay separate surfaces.
-- Skinned meshes, particles and lights are not merged.
-- Hidden-face removal is a sampling test, so very thin or open geometry may keep extra triangles; it can't see
-  through transparent surfaces (those are never occluders).
-- Simplification steps are coarse (each level halves the triangles).
-- Tested on the Godot 4.8 beta build only; 4.3+ is the target, since it needs `ImporterMesh.generate_lods` and
-  visibility ranges.
-
-## Tests
+This folder is also a Godot project with all add-ons enabled and the test suites in `tests/`:
 
 ```bash
-godot --headless --path . -s res://tests/run_tests.gd
+godot --headless --import --path .
+godot --headless --path . -s res://tests/run_tests.gd            # hlod
+godot --headless --path . -s res://tests/run_occluder_tests.gd
+godot --headless --path . -s res://tests/run_streaming_tests.gd
+godot --headless --path . -s res://tests/run_foliage_tests.gd
+godot --headless --path . -s res://tests/run_origin_tests.gd
+godot --headless --path . -s res://tests/run_hitch_tests.gd
+godot --headless --path . -s res://tests/run_overlay_tests.gd
+xvfb-run -a godot --path . --rendering-method forward_plus -s res://tests/run_impostor_tests.gd   # needs a renderer
 ```
+
+Tested on the Godot 4.8 beta only (software renderer for the rendering tests); the target is stock 4.3+.
+The HLOD add-on's class `HLODCluster` replaces the `HLODCluster3D` node of the engine fork; don't enable both.
