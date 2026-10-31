@@ -9,6 +9,13 @@ extends MeshInstance3D
 		data = value
 		_update()
 
+## Cast the baked silhouette as a shadow. In the shadow pass the quad faces the light and shows the baked view that
+## looks along the light, so its cut-out shape is what falls on the ground. Shadows still stop at the light's shadow distance.
+@export var cast_shadows := true:
+	set(value):
+		cast_shadows = value
+		cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if value else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
 @export_group("Switching")
 ## Beyond this distance the impostor is shown instead of the target.
 @export_range(0.01, 4096.0, 0.01, "or_greater", "suffix:m") var switch_distance := 150.0:
@@ -30,10 +37,6 @@ extends MeshInstance3D
 		_reset_target()
 		target = value
 		_update()
-
-
-func _init() -> void:
-	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _enter_tree() -> void:

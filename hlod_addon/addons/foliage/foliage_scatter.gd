@@ -206,7 +206,8 @@ func _make_far(transforms: Array[Transform3D]) -> MultiMeshInstance3D:
 	node.name = "Far"
 	node.multimesh = impostor.create_multimesh(transforms)
 	node.set_meta(META_KEY, true)
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows \
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.visibility_range_begin = near_distance
 	node.visibility_range_begin_margin = margin
 	node.visibility_range_fade_mode = fade_mode as GeometryInstance3D.VisibilityRangeFadeMode

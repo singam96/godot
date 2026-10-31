@@ -41,7 +41,7 @@ Use one FoliageScatter per kind (oak, pine, bush, rock) so each can have its own
 
 - Every chunk has its own MultiMesh pair, so choose a *Chunk Size* of 30 to 100 m: smaller culls better but makes more
   draw calls, larger draws more that you can't see.
-- Shadows: *Cast Shadows* applies to the near mesh only; impostors never cast shadows.
+- Shadows: *Cast Shadows* applies to both the near mesh and the impostor level (shadows end at the light's shadow distance).
 - Large worlds: combine with the World Streaming add-on by putting one FoliageScatter per cell scene.
 
 Tests: `godot --headless --path . -s res://tests/run_foliage_tests.gd` (or under `xvfb-run` with a renderer, which

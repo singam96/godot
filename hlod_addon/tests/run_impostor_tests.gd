@@ -77,6 +77,50 @@ func _coverage(img: Image) -> int:
 	return n
 
 
+## Counts the grey ground pixels in shadow and their x range, seen from above. The test scene has a white ground at
+## y = -1.5 and a shadow-casting sun.
+func _shadow_stats(subject: Node3D, camera: Camera3D) -> Array:
+	root.add_child(subject)
+	for i in 5:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	var img := root.get_texture().get_image()
+	subject.free()
+	var dark := 0
+	var min_x := 100000
+	var max_x := -1
+	for y in range(0, img.get_height(), 2):
+		for x in range(0, img.get_width(), 2):
+			var c := img.get_pixel(x, y)
+			if absf(c.r - c.g) < 0.02 and c.r < 0.3:
+				dark += 1
+				min_x = mini(min_x, x)
+				max_x = maxi(max_x, x)
+	return [dark, min_x, max_x]
+
+
+func _shadow_case(label: String, source: Node3D, data: ImpostorData, camera: Camera3D) -> void:
+	var real_stats: Array = await _shadow_stats(source.duplicate(), camera)
+	var imp := Impostor3D.new()
+	imp.data = data
+	imp.switch_distance = 1.0
+	imp.switch_margin = 0.0
+	var imp_stats: Array = await _shadow_stats(imp, camera)
+	imp = Impostor3D.new()
+	imp.data = data
+	imp.switch_distance = 1.0
+	imp.switch_margin = 0.0
+	imp.cast_shadows = false
+	var off_stats: Array = await _shadow_stats(imp, camera)
+	_check(real_stats[0] > 300, "%s: the real object casts a shadow (%d px)" % [label, real_stats[0]])
+	print("  ", label, ": real ", real_stats[0], " px, impostor ", imp_stats[0], " px")
+	_check(absf(imp_stats[0] - real_stats[0]) < 0.15 * real_stats[0],
+			"%s: impostor shadow area matches (%d vs %d px)" % [label, imp_stats[0], real_stats[0]])
+	_check(absi(imp_stats[1] - real_stats[1]) < 25 and absi(imp_stats[2] - real_stats[2]) < 25,
+			"%s: impostor shadow reaches the same place (x %d..%d vs %d..%d)" % [label, imp_stats[1], imp_stats[2], real_stats[1], real_stats[2]])
+	_check(off_stats[0] == 0, "%s: no shadow when cast_shadows is off (%d px)" % [label, off_stats[0]])
+
+
 func _init() -> void:
 	root.size = Vector2i(320, 320)
 	var env := WorldEnvironment.new()
@@ -213,7 +257,6 @@ func _init() -> void:
 	_check(unlit_img.get_pixel(cx, cy).is_equal_approx(unlit_img2.get_pixel(cx, cy)), "unlit impostor does not change with light")
 	lit_imp.free()
 	sun.free()
-	sphere_source.free()
 
 	print("alpha cut-outs (leaf cards): normals are cut out like the colors")
 	var leaf_img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
@@ -256,6 +299,49 @@ func _init() -> void:
 	_check(absf(leaf_normal.b - 1.0) < 0.1 or absf(leaf_normal.b - 0.0) < 0.1, "a flat leaf facing the camera has a +z or -z normal %s" % leaf_normal)
 	leaf_source.free()
 
+	print("shadows: impostors cast the silhouette of the view that looks along the light")
+	var ground := MeshInstance3D.new()
+	var ground_mesh := BoxMesh.new()
+	ground_mesh.size = Vector3(200, 1, 200)
+	var ground_mat := StandardMaterial3D.new()
+	ground_mat.roughness = 1.0
+	ground_mat.metallic_specular = 0.0
+	ground_mesh.material = ground_mat
+	ground.mesh = ground_mesh
+	ground.position = Vector3(0, -2.0, 0)
+	root.add_child(ground)
+	var shadow_sun := DirectionalLight3D.new()
+	shadow_sun.shadow_enabled = true
+	shadow_sun.directional_shadow_max_distance = 300.0
+	root.add_child(shadow_sun)
+	shadow_sun.basis = Basis.looking_at(Vector3(1, -0.6, 0.2))
+	var top_cam := Camera3D.new()
+	root.add_child(top_cam)
+	top_cam.current = true
+	top_cam.fov = 40
+	top_cam.position = Vector3(6, 90, 0.01)
+	top_cam.look_at(Vector3(6, -1.5, 0), Vector3.FORWARD)
+	await _shadow_case("sphere", sphere_source, lit_data, top_cam)
+	var long_box := Node3D.new()
+	var long_mi := MeshInstance3D.new()
+	var long_mesh := BoxMesh.new()
+	long_mesh.size = Vector3(2, 2, 12)
+	long_mesh.material = lit_mat
+	long_mi.mesh = long_mesh
+	long_mi.position = Vector3(0, 3, 0)
+	long_box.add_child(long_mi)
+	# The shadow follows the sun's elevation: long thin objects need rows close to it (here 4 rows from 10 to 55 degrees).
+	var long_settings := Baker.Settings.new()
+	long_settings.views = 12
+	long_settings.rows = 4
+	long_settings.cell_size = 128
+	var long_data: ImpostorData = await Baker.bake(root, long_box, long_settings)
+	await _shadow_case("long box", long_box, long_data, top_cam)
+	top_cam.free()
+	shadow_sun.free()
+	ground.free()
+	long_box.free()
+
 	print("old data without normals still works")
 	var legacy := ImpostorData.new()
 	legacy.atlas = data.atlas
@@ -265,6 +351,8 @@ func _init() -> void:
 	legacy.center = data.center
 	var legacy_mat := legacy.create_material()
 	_check(legacy_mat.shader.resource_path.ends_with("impostor.gdshader"), "falls back to the unlit shader")
+
+	sphere_source.free()
 
 	print("multimesh and save/load")
 	var xforms: Array[Transform3D] = [Transform3D(Basis(), Vector3(-6, 0, 0)), Transform3D(Basis(), Vector3(6, 0, 0))]

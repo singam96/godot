@@ -38,11 +38,25 @@ Bake an `HLODCluster` and set the Impostor3D's target to it. The cluster then ha
 nearby, its merged HLOD proxy in the middle, and the impostor beyond the impostor's switch distance. Keep the
 impostor distance well above the cluster's own switch distance.
 
+## Shadows
+
+Impostors cast shadows (*Cast Shadows* on the Impostor3D, on by default). In the shadow pass the quad faces the light
+and shows the baked view that looks along the light, so the object's cut-out silhouette is what falls on the ground,
+in the right place: in a test the shadow of a baked sphere had the same area as the real one (1814 vs 1813 pixels).
+Things to know:
+
+- The shadow is only as accurate as the baked views near the sun. Trees are forgiving; long thin objects are not.
+  Choose *Min/Max Elevation* so that the rows cover the sun's elevation, and use 3 to 4 rows. With 12 views and 4 rows a
+  12 m long box's shadow was within 9% of the real one; with only 2 rows (10 and 55 degrees) it was 19% too small.
+- Shadows stop at the light's *Shadow Max Distance*, so impostors beyond it cast none, and they cost shadow-map time
+  like any other caster. Turn *Cast Shadows* off for impostors that are far enough not to matter.
+- Point and spot lights work the same way, but the quad turns towards the light, so keep impostors out of their near range.
+
 ## Limits
 
 - Lighting: with *Lit* on (the default) the bake also stores the object's normals, and the impostor is lit by the
   scene's lights, ambient light, global illumination and fog like a real object, and receives shadows from other
-  objects. It is diffuse only (no specular or reflections), it does not cast shadows, and the color atlas is baked
+  objects. It is diffuse only (no specular or reflections), and the color atlas is baked
   with flat ambient light, so metals and emission look flatter. Turn *Lit* off for a cheaper, unlit impostor
   (`ImpostorData.lit = false`), or old data without normals, which falls back to unlit by itself. The normal atlas
   doubles the bake time and the file size.
