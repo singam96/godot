@@ -11,6 +11,7 @@ var _views: SpinBox
 var _rows: SpinBox
 var _cell: OptionButton
 var _distance: SpinBox
+var _lit: CheckBox
 var _progress: AcceptDialog
 var _progress_bar: ProgressBar
 var _progress_label: Label
@@ -41,6 +42,11 @@ func _enter_tree() -> void:
 	_cell.select(1)
 	grid.add_child(_cell)
 	_distance = _add_spin(grid, "Switch distance (m):", 1, 4096, 150)
+	_lit = CheckBox.new()
+	_lit.text = "Lit (also bake normals)"
+	_lit.button_pressed = true
+	grid.add_child(_lit)
+	grid.add_child(Control.new())
 	_dialog.add_child(grid)
 	EditorInterface.get_base_control().add_child(_dialog)
 
@@ -122,6 +128,7 @@ func _bake() -> void:
 	settings.views = int(_views.value)
 	settings.rows = int(_rows.value)
 	settings.cell_size = _cell.get_selected_id()
+	settings.bake_normals = _lit.button_pressed
 	settings.progress = _on_progress
 	_progress_bar.value = 0.0
 	_progress_label.text = "Preparing..."

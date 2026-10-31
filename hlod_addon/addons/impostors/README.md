@@ -40,8 +40,12 @@ impostor distance well above the cluster's own switch distance.
 
 ## Limits
 
-- Lighting is baked in. The impostor is drawn unlit, so it doesn't follow the sun's direction or react to lights and
-  shadows (it still gets fog). Bake with the lighting you want; *Brightness* in the baker settings scales it.
+- Lighting: with *Lit* on (the default) the bake also stores the object's normals, and the impostor is lit by the
+  scene's lights, ambient light, global illumination and fog like a real object, and receives shadows from other
+  objects. It is diffuse only (no specular or reflections), it does not cast shadows, and the color atlas is baked
+  with flat ambient light, so metals and emission look flatter. Turn *Lit* off for a cheaper, unlit impostor
+  (`ImpostorData.lit = false`), or old data without normals, which falls back to unlit by itself. The normal atlas
+  doubles the bake time and the file size.
 - Views are blended, so you may see a soft ghost between angles with few views. Add views or rows to reduce it.
 - The quad is a flat camera-facing billboard with no depth; where impostors overlap each other or real geometry
   the intersection is a straight line.

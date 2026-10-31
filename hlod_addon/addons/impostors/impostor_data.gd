@@ -4,9 +4,14 @@ extends Resource
 ## A baked impostor: an atlas with several views of an object, and what is needed to draw it as a camera-facing quad.
 
 const SHADER := preload("impostor.gdshader")
+const LIT_SHADER := preload("impostor_lit.gdshader")
 
 ## Columns are views around the object (azimuth), rows are views from higher up (elevation).
 @export var atlas: Texture2D
+## Object-space normals for the same views, so that the impostor can be lit. Without it the impostor is unlit.
+@export var normal_atlas: Texture2D
+## Light the impostor with the scene's lights (needs [member normal_atlas]).
+@export var lit := true
 @export_range(1, 64) var views := 12
 @export_range(1, 8) var rows := 2
 @export_range(0.0, 90.0, 0.1, "degrees") var min_elevation := 10.0
@@ -19,8 +24,11 @@ const SHADER := preload("impostor.gdshader")
 
 func create_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
-	material.shader = SHADER
+	var use_light := lit and normal_atlas != null
+	material.shader = LIT_SHADER if use_light else SHADER
 	material.set_shader_parameter("atlas", atlas)
+	if use_light:
+		material.set_shader_parameter("normal_atlas", normal_atlas)
 	material.set_shader_parameter("views", views)
 	material.set_shader_parameter("rows", rows)
 	material.set_shader_parameter("min_elevation", deg_to_rad(min_elevation))

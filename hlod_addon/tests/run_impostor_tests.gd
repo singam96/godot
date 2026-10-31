@@ -97,6 +97,13 @@ func _init() -> void:
 	if data == null:
 		quit(1)
 		return
+	_check(data.normal_atlas != null and data.lit, "normals are baked and the impostor is lit by default")
+	var normals := data.normal_atlas.get_image()
+	_check(normals.get_size() == data.atlas.get_image().get_size(), "normal atlas has the same size")
+	# View 0 looks along -z at a box: the front face normal is +z, which is stored as (0.5, 0.5, 1.0).
+	var nf := normals.get_pixel(64, 64)
+	_check(absf(nf.r - 0.5) < 0.06 and absf(nf.g - 0.5) < 0.06 and nf.b > 0.93, "front face normal is +z %s" % nf)
+	data.lit = false  # The comparison below is against an unshaded object.
 	var atlas := data.atlas.get_image()
 	_check(atlas.get_size() == Vector2i(8 * 128, 2 * 128), "atlas size %s" % atlas.get_size())
 	_check(data.quad_size > 7.0 and data.quad_size < 9.5, "quad size %f" % data.quad_size)
@@ -145,6 +152,120 @@ func _init() -> void:
 	_check(cf.b > 0.6 and cf.r < 0.3, "rotated instance shows the other side %s" % cf)
 	imp.free()
 
+	print("lit: the impostor reacts to light like the real object")
+	var lit_env: Environment = env.environment
+	lit_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	lit_env.ambient_light_color = Color(0.15, 0.15, 0.15)
+	var lit_mat := StandardMaterial3D.new()
+	lit_mat.albedo_color = Color(0.9, 0.5, 0.2)
+	lit_mat.roughness = 1.0
+	lit_mat.metallic_specular = 0.0
+	var sphere_mesh := SphereMesh.new()
+	sphere_mesh.radius = 4.0
+	sphere_mesh.height = 8.0
+	sphere_mesh.material = lit_mat
+	var sphere_source := Node3D.new()
+	var sphere_mi := MeshInstance3D.new()
+	sphere_mi.mesh = sphere_mesh
+	sphere_mi.position = Vector3(0, 3, 0)
+	sphere_source.add_child(sphere_mi)
+	var lit_settings := Baker.Settings.new()
+	lit_settings.views = 12
+	lit_settings.rows = 2
+	lit_settings.cell_size = 128
+	var lit_data: ImpostorData = await Baker.bake(root, sphere_source, lit_settings)
+	var sun := DirectionalLight3D.new()
+	root.add_child(sun)
+	sun.basis = Basis.looking_at(Vector3(-0.5, -0.6, -1.0))
+	var real_sphere := sphere_source.duplicate() as Node3D
+	root.add_child(real_sphere)
+	var real_img := await _look(real_sphere, Vector3(0, 0, 1), 200.0)
+	real_sphere.free()
+	var lit_imp := Impostor3D.new()
+	lit_imp.data = lit_data
+	lit_imp.switch_distance = 1.0
+	lit_imp.switch_margin = 0.0
+	root.add_child(lit_imp)
+	var imp_img := await _look(lit_imp, Vector3(0, 0, 1), 200.0)
+	var cx := real_img.get_width() / 2
+	var cy := real_img.get_height() / 2
+	var worst := 0.0
+	for dx in [-24, -12, 0, 12, 24]:
+		var a := real_img.get_pixel(cx + dx, cy)
+		var b := imp_img.get_pixel(cx + dx, cy)
+		worst = maxf(worst, maxf(absf(a.r - b.r), maxf(absf(a.g - b.g), absf(a.b - b.b))))
+	_check(worst < 0.1, "shading across the sphere matches the real one (worst difference %.3f)" % worst)
+	var lit_left := imp_img.get_pixel(cx - 24, cy)
+	var lit_right := imp_img.get_pixel(cx + 24, cy)
+	_check(lit_right.r > lit_left.r + 0.05 or lit_left.r > lit_right.r + 0.05, "the impostor is shaded, not flat (%s vs %s)" % [lit_left, lit_right])
+	# Move the light behind the object: the visible side gets dark.
+	var front_center := imp_img.get_pixel(cx, cy)
+	sun.basis = Basis.looking_at(Vector3(0.3, -0.3, 1.0))
+	var dark_img := await _look(lit_imp, Vector3(0, 0, 1), 200.0)
+	var dark_center := dark_img.get_pixel(cx, cy)
+	_check(dark_center.r < front_center.r * 0.5, "light from behind darkens the front (%s -> %s)" % [front_center, dark_center])
+	# Unlit data ignores the light.
+	lit_data.lit = false
+	lit_imp.data = lit_data
+	var unlit_img := await _look(lit_imp, Vector3(0, 0, 1), 200.0)
+	sun.basis = Basis.looking_at(Vector3(-0.5, -0.6, -1.0))
+	var unlit_img2 := await _look(lit_imp, Vector3(0, 0, 1), 200.0)
+	_check(unlit_img.get_pixel(cx, cy).is_equal_approx(unlit_img2.get_pixel(cx, cy)), "unlit impostor does not change with light")
+	lit_imp.free()
+	sun.free()
+	sphere_source.free()
+
+	print("alpha cut-outs (leaf cards): normals are cut out like the colors")
+	var leaf_img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	for y in 64:
+		for x in 64:
+			var inside := Vector2(x - 32, y - 32).length() < 24.0
+			leaf_img.set_pixel(x, y, Color(0.2, 0.7, 0.2, 1.0 if inside else 0.0))
+	var leaf_mat := StandardMaterial3D.new()
+	leaf_mat.albedo_texture = ImageTexture.create_from_image(leaf_img)
+	leaf_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	leaf_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var leaf_mesh := QuadMesh.new()
+	leaf_mesh.size = Vector2(6, 6)
+	leaf_mesh.material = leaf_mat
+	var leaf_source := Node3D.new()
+	var leaf_mi := MeshInstance3D.new()
+	leaf_mi.mesh = leaf_mesh
+	leaf_mi.position = Vector3(0, 3, 0)
+	leaf_source.add_child(leaf_mi)
+	var leaf_settings := Baker.Settings.new()
+	leaf_settings.views = 4
+	leaf_settings.rows = 1
+	leaf_settings.cell_size = 128
+	var leaf_data: ImpostorData = await Baker.bake(root, leaf_source, leaf_settings)
+	var color_img := leaf_data.atlas.get_image()
+	var norm_img := leaf_data.normal_atlas.get_image()
+	var color_px := 0
+	var norm_px := 0
+	var matching := 0
+	for y in range(0, 128, 2):
+		for x in range(0, 128, 2):
+			var c := color_img.get_pixel(x, y).a > 0.5
+			var n := norm_img.get_pixel(x, y).a > 0.5
+			color_px += 1 if c else 0
+			norm_px += 1 if n else 0
+			matching += 1 if c == n else 0
+	_check(color_px > 300 and color_px < 3500, "the leaf is a disc, not the whole quad (%d of 4096 samples)" % color_px)
+	_check(matching >= 0.97 * 4096, "normal cut-out matches color cut-out (%d of 4096 agree)" % matching)
+	var leaf_normal := norm_img.get_pixel(64, 64)
+	_check(absf(leaf_normal.b - 1.0) < 0.1 or absf(leaf_normal.b - 0.0) < 0.1, "a flat leaf facing the camera has a +z or -z normal %s" % leaf_normal)
+	leaf_source.free()
+
+	print("old data without normals still works")
+	var legacy := ImpostorData.new()
+	legacy.atlas = data.atlas
+	legacy.views = data.views
+	legacy.rows = data.rows
+	legacy.quad_size = data.quad_size
+	legacy.center = data.center
+	var legacy_mat := legacy.create_material()
+	_check(legacy_mat.shader.resource_path.ends_with("impostor.gdshader"), "falls back to the unlit shader")
+
 	print("multimesh and save/load")
 	var xforms: Array[Transform3D] = [Transform3D(Basis(), Vector3(-6, 0, 0)), Transform3D(Basis(), Vector3(6, 0, 0))]
 	var mm := data.create_multimesh(xforms)
@@ -152,7 +273,7 @@ func _init() -> void:
 	var path := "user://impostor_test.res"
 	_check(ResourceSaver.save(data, path) == OK, "save")
 	var loaded := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as ImpostorData
-	_check(loaded != null and loaded.views == 8 and loaded.atlas.get_width() == 1024, "round trip")
+	_check(loaded != null and loaded.views == 8 and loaded.atlas.get_width() == 1024 and loaded.normal_atlas != null, "round trip")
 
 	print("target visibility ranges")
 	var holder := Node3D.new()
@@ -193,6 +314,7 @@ func _init() -> void:
 	await process_frame
 	var ball_data: ImpostorData = await Baker.bake(root, cluster, settings)
 	_check(ball_data != null, "cluster bakes")
+	ball_data.lit = false
 	var far := Impostor3D.new()
 	far.data = ball_data
 	far.switch_distance = 100.0

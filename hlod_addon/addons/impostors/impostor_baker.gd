@@ -3,6 +3,7 @@ extends RefCounted
 ## Renders an object from several sides into an [ImpostorData]. This needs a running renderer, so it can't be used
 ## with --headless, and it is a coroutine: [code]var data = await Baker.bake(host, node, settings)[/code].
 
+const NORMAL_SHADER := preload("normal_pass.gdshader")
 const PADDING := 4  ## Transparent pixels around the object in every view, so mipmaps don't mix views.
 
 class Settings:
@@ -13,6 +14,8 @@ class Settings:
 	var max_elevation := 55.0
 	## Strength of the ambient light the views are lit with; 1.0 shows the albedo as it is.
 	var brightness := 1.0
+	## Also bake normals, so the impostor can react to the scene's lights. Doubles the bake time and the size.
+	var bake_normals := true
 	## Called with a value from 0 to 1 and a text, after each view.
 	var progress := Callable()
 
@@ -65,8 +68,39 @@ static func bake(host: Node, source: Node3D, settings: Settings) -> ImpostorData
 	viewport.add_child(camera)
 	camera.make_current()
 
+	var passes := 2 if settings.bake_normals else 1
+	var atlas := await _render_pass(viewport, camera, center, radius, views, rows, cell, settings, 0, passes)
+	var normal_atlas: Image = null
+	if settings.bake_normals:
+		_use_normal_materials(copy)
+		normal_atlas = await _render_pass(viewport, camera, center, radius, views, rows, cell, settings, 1, passes)
+		# The image comes out sRGB-encoded; the values are data, not colors.
+		normal_atlas.srgb_to_linear()
+	viewport.queue_free()
+
+	atlas.fix_alpha_edges()
+	atlas.generate_mipmaps()
+	if normal_atlas != null:
+		normal_atlas.fix_alpha_edges()
+		normal_atlas.generate_mipmaps()
+
+	var data := ImpostorData.new()
+	data.atlas = ImageTexture.create_from_image(atlas)
+	if normal_atlas != null:
+		data.normal_atlas = ImageTexture.create_from_image(normal_atlas)
+	data.views = views
+	data.rows = rows
+	data.min_elevation = settings.min_elevation
+	data.max_elevation = settings.max_elevation
+	data.quad_size = quad_size
+	data.center = center
+	return data
+
+
+static func _render_pass(viewport: SubViewport, camera: Camera3D, center: Vector3, radius: float, views: int, rows: int,
+		cell: int, settings: Settings, pass_index: int, passes: int) -> Image:
 	var atlas := Image.create(views * cell, rows * cell, false, Image.FORMAT_RGBA8)
-	var total := views * rows
+	var total := views * rows * passes
 	for j in rows:
 		var elevation := deg_to_rad(settings.min_elevation)
 		if rows > 1:
@@ -82,22 +116,67 @@ static func bake(host: Node, source: Node3D, settings: Settings) -> ImpostorData
 			image.convert(Image.FORMAT_RGBA8)
 			atlas.blit_rect(image, Rect2i(0, 0, cell, cell), Vector2i(i * cell, j * cell))
 			if settings.progress.is_valid():
-				var done := j * views + i + 1
-				settings.progress.call(float(done) / float(total), "Rendering view %d of %d..." % [done, total])
-	viewport.queue_free()
+				var done := pass_index * views * rows + j * views + i + 1
+				settings.progress.call(float(done) / float(total),
+						"Rendering %s view %d of %d..." % ["normal" if pass_index == 1 else "color", done - pass_index * views * rows, views * rows])
+	return atlas
 
-	atlas.fix_alpha_edges()
-	atlas.generate_mipmaps()
 
-	var data := ImpostorData.new()
-	data.atlas = ImageTexture.create_from_image(atlas)
-	data.views = views
-	data.rows = rows
-	data.min_elevation = settings.min_elevation
-	data.max_elevation = settings.max_elevation
-	data.quad_size = quad_size
-	data.center = center
-	return data
+## Swaps every material below [param root] for one that draws normals, keeping alpha cut-outs, textures and culling.
+static func _use_normal_materials(root: Node) -> void:
+	var shaders := {}
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var node := stack.pop_back()
+		var mi := node as MeshInstance3D
+		var mmi := node as MultiMeshInstance3D
+		if mi != null and mi.mesh != null:
+			if mi.material_override != null:
+				mi.material_override = _normal_material(mi.material_override, shaders)
+			else:
+				for s in mi.mesh.get_surface_count():
+					mi.set_surface_override_material(s, _normal_material(mi.get_active_material(s), shaders))
+		elif mmi != null and mmi.multimesh != null and mmi.multimesh.mesh != null:
+			var source: Material = mmi.material_override
+			if source == null and mmi.multimesh.mesh.get_surface_count() > 0:
+				source = mmi.multimesh.mesh.surface_get_material(0)
+			mmi.material_override = _normal_material(source, shaders)
+		stack.append_array(node.get_children(true))
+
+
+static func _normal_material(source: Material, shaders: Dictionary) -> ShaderMaterial:
+	var base := source as BaseMaterial3D
+	var cull := "cull_back"
+	if base != null:
+		match base.cull_mode:
+			BaseMaterial3D.CULL_DISABLED:
+				cull = "cull_disabled"
+			BaseMaterial3D.CULL_FRONT:
+				cull = "cull_front"
+	elif source is ShaderMaterial:
+		cull = "cull_disabled"  # Unknown: draw both sides.
+	if not shaders.has(cull):
+		var shader := Shader.new()
+		shader.code = NORMAL_SHADER.code.replace("cull_back", cull)
+		shaders[cull] = shader
+	var material := ShaderMaterial.new()
+	material.shader = shaders[cull]
+	if base != null:
+		material.set_shader_parameter("albedo_color", base.albedo_color)
+		if base.albedo_texture != null:
+			material.set_shader_parameter("albedo_tex", base.albedo_texture)
+			material.set_shader_parameter("use_albedo_tex", true)
+		if base.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR:
+			material.set_shader_parameter("alpha_cut", base.alpha_scissor_threshold)
+		elif base.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+			material.set_shader_parameter("alpha_cut", 0.5)
+		material.set_shader_parameter("uv1_scale", base.uv1_scale)
+		material.set_shader_parameter("uv1_offset", base.uv1_offset)
+		if base.normal_enabled and base.normal_texture != null:
+			material.set_shader_parameter("normal_tex", base.normal_texture)
+			material.set_shader_parameter("use_normal_tex", true)
+			material.set_shader_parameter("normal_scale", base.normal_scale)
+	return material
 
 
 static func _combined_aabb(root: Node3D) -> AABB:
