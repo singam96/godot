@@ -31,6 +31,7 @@
 #include "render_forward_clustered.h"
 
 #include "core/config/project_settings.h"
+#include "servers/rendering/renderer_rd/effects/multimesh_cull.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
@@ -426,6 +427,24 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 		RID xforms_uniform_set = surf->owner->transforms_uniform_set;
 
+		// The main view and the shadow passes draw a GPU culled copy of big MultiMeshes. The other
+		// passes keep drawing all of the instances.
+		RID cull_command_buffer;
+		if (element_info.lod_index == 0 && surf->surface == surf->surface_shadow && !(surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_PARTICLE_TRAILS)) {
+			if (p_pass_mode == PASS_MODE_COLOR || p_pass_mode == PASS_MODE_DEPTH || p_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS || p_pass_mode == PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI) {
+				cull_command_buffer = surf->owner->cull_command_buffer;
+				if (cull_command_buffer.is_valid()) {
+					xforms_uniform_set = surf->owner->cull_transforms_uniform_set;
+				}
+			} else if (p_pass_mode == PASS_MODE_SHADOW) {
+				cull_command_buffer = surf->owner->shadow_cull_command_buffer;
+				if (cull_command_buffer.is_valid()) {
+					xforms_uniform_set = surf->owner->shadow_cull_transforms_uniform_set;
+				}
+			}
+		}
+		const bool culled_multimesh = cull_command_buffer.is_valid();
+
 		SceneShaderForwardClustered::ShaderSpecialization pipeline_specialization = p_params->base_specialization;
 		pipeline_specialization.multimesh = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH);
 		pipeline_specialization.multimesh_format_2d = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_FORMAT_2D);
@@ -617,6 +636,8 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 					WARN_PRINT("Indirect draws are not supported when emulating point size.");
 				}
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
+			} else if (culled_multimesh && !emulate_point_size) {
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), cull_command_buffer, surf->surface_index * sizeof(uint32_t) * 5, 1, 0);
 			} else if (indirect) {
 				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), mesh_storage->_multimesh_get_command_buffer_rd_rid(surf->owner->data->base), surf->surface_index * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
 			} else {
@@ -2015,6 +2036,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA, render_info);
 
+	_cull_multimeshes(p_render_data);
+
 	RD::get_singleton()->draw_command_end_label();
 
 	if (!is_reflection_probe) {
@@ -2905,6 +2928,64 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 	}
 }
 
+bool RenderForwardClustered::_cull_multimesh(GeometryInstanceForwardClustered *p_instance, uint32_t p_slot, const Plane *p_frustum, uint32_t p_min_instances, uint64_t p_frame, RID &r_uniform_set, RID &r_command_buffer) {
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+
+	RendererRD::MeshStorage::MultiMeshCullInfo info;
+	if (!mesh_storage->multimesh_get_cull_info(p_instance->data->base, info) || info.instance_count < p_min_instances) {
+		return false;
+	}
+
+	Vector<uint32_t> index_counts;
+	index_counts.resize(info.surface_count);
+	for (uint32_t k = 0; k < info.surface_count; k++) {
+		index_counts.write[k] = mesh_storage->mesh_get_surface_vertices_drawn_count(info.mesh, k);
+	}
+
+	AABB aabb = mesh_storage->mesh_get_aabb(info.mesh);
+	RendererRD::MultiMeshCull::Result result;
+	if (!multimesh_cull->cull(p_slot, p_instance->data->base, info.buffer, info.stride_floats, info.instance_count, index_counts, p_instance->transform, aabb.get_center(), aabb.size.length() * 0.5f, p_frustum, p_frame, result)) {
+		return false;
+	}
+
+	RD::Uniform u(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, result.buffer);
+	r_uniform_set = UniformSetCacheRD::get_singleton()->get_cache(scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET, u);
+	r_command_buffer = result.command_buffer;
+	return true;
+}
+
+void RenderForwardClustered::_cull_multimeshes(const RenderDataRD *p_render_data) {
+	const uint32_t min_instances = GLOBAL_GET("rendering/limits/multimesh/gpu_culling_min_instances");
+	// Multiview rendering (XR) would need a cull per eye, so it keeps the regular path.
+	const bool enabled = min_instances > 0 && p_render_data->scene_data->view_count == 1;
+	const uint64_t frame = Engine::get_singleton()->get_frames_drawn();
+
+	Plane frustum[6];
+	bool have_frustum = false;
+
+	if (p_render_data->instances != nullptr) {
+		for (uint32_t i = 0; i < p_render_data->instances->size(); i++) {
+			GeometryInstanceForwardClustered *ginstance = static_cast<GeometryInstanceForwardClustered *>((*p_render_data->instances)[i]);
+			ginstance->cull_command_buffer = RID();
+			ginstance->cull_transforms_uniform_set = RID();
+			if (!enabled || ginstance->data->base_type != RSE::INSTANCE_MULTIMESH) {
+				continue;
+			}
+			if (!have_frustum) {
+				Vector<Plane> planes = p_render_data->scene_data->cam_projection.get_projection_planes(p_render_data->scene_data->cam_transform);
+				ERR_BREAK(planes.size() != 6);
+				for (int k = 0; k < 6; k++) {
+					frustum[k] = planes[k];
+				}
+				have_frustum = true;
+			}
+			_cull_multimesh(ginstance, 0, frustum, min_instances, frame, ginstance->cull_transforms_uniform_set, ginstance->cull_command_buffer);
+		}
+	}
+
+	multimesh_cull->sweep(frame);
+}
+
 void RenderForwardClustered::_render_shadow_begin() {
 	scene_state.shadow_passes.clear();
 	RD::get_singleton()->draw_command_begin_label("Shadow Setup");
@@ -2981,6 +3062,10 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 		shadow_pass.screen_mesh_lod_threshold = scene_data.screen_mesh_lod_threshold;
 		shadow_pass.lod_distance_multiplier = scene_data.lod_distance_multiplier;
 
+		shadow_pass.cull_enabled = !p_use_dp;
+		shadow_pass.cull_projection = p_projection;
+		shadow_pass.cull_transform = p_transform;
+
 		shadow_pass.framebuffer = p_framebuffer;
 		shadow_pass.clear_depth = p_begin || p_clear_region;
 		shadow_pass.rect = p_rect;
@@ -3010,7 +3095,41 @@ void RenderForwardClustered::_render_shadow_process() {
 void RenderForwardClustered::_render_shadow_end() {
 	RD::get_singleton()->draw_command_begin_label("Shadow Render");
 
+	const uint32_t min_instances = GLOBAL_GET("rendering/limits/multimesh/gpu_culling_min_instances");
+	const uint64_t frame = Engine::get_singleton()->get_frames_drawn();
+
 	for (SceneState::ShadowPass &shadow_pass : scene_state.shadow_passes) {
+		// Cull the MultiMeshes drawn by this pass against its own view. The copy is reused by the next pass,
+		// which is recorded after this one has drawn.
+		if (shadow_pass.pass_mode == PASS_MODE_SHADOW) {
+			Plane frustum[6];
+			bool have_frustum = false;
+			const uint64_t stamp = ++shadow_cull_serial;
+			for (uint32_t k = 0; k < shadow_pass.element_count; k++) {
+				GeometryInstanceForwardClustered *owner = render_list[RENDER_LIST_SECONDARY].elements[shadow_pass.element_from + k]->owner;
+				if (owner->shadow_cull_stamp == stamp) {
+					continue;
+				}
+				owner->shadow_cull_stamp = stamp;
+				owner->shadow_cull_command_buffer = RID();
+				owner->shadow_cull_transforms_uniform_set = RID();
+				if (min_instances == 0 || !shadow_pass.cull_enabled || owner->data->base_type != RSE::INSTANCE_MULTIMESH) {
+					continue;
+				}
+				if (!have_frustum) {
+					Vector<Plane> planes = shadow_pass.cull_projection.get_projection_planes(shadow_pass.cull_transform);
+					ERR_BREAK(planes.size() == 6 ? false : true);
+					for (int p = 0; p < 6; p++) {
+						frustum[p] = planes[p];
+					}
+					// Casters between the light and the view still shadow it (the shadow is flattened onto the near plane).
+					frustum[0] = Plane(Vector3(), 1e30);
+					have_frustum = true;
+				}
+				_cull_multimesh(owner, 1, frustum, min_instances, frame, owner->shadow_cull_transforms_uniform_set, owner->shadow_cull_command_buffer);
+			}
+		}
+
 		RenderListParameters render_list_parameters(render_list[RENDER_LIST_SECONDARY].elements.ptr() + shadow_pass.element_from, render_list[RENDER_LIST_SECONDARY].element_info.ptr() + shadow_pass.element_from, shadow_pass.element_count, shadow_pass.flip_cull, shadow_pass.pass_mode, 0, true, false, shadow_pass.rp_uniform_set, false, Vector2(), shadow_pass.lod_distance_multiplier, shadow_pass.screen_mesh_lod_threshold, 1, shadow_pass.element_from);
 		_render_list_with_draw_list(&render_list_parameters, shadow_pass.framebuffer, shadow_pass.clear_depth ? RD::DRAW_CLEAR_DEPTH : RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, shadow_pass.rect);
 	}
@@ -5244,6 +5363,8 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 }
 
 RenderForwardClustered::RenderForwardClustered() {
+	multimesh_cull = memnew(RendererRD::MultiMeshCull);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/limits/multimesh/gpu_culling_min_instances", PROPERTY_HINT_RANGE, "0,1000000,1,or_greater"), 0);
 	singleton = this;
 
 	/* SCENE SHADER */
@@ -5406,6 +5527,7 @@ RenderForwardClustered::RenderForwardClustered() {
 }
 
 RenderForwardClustered::~RenderForwardClustered() {
+	memdelete(multimesh_cull);
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);
 		ss_effects = nullptr;

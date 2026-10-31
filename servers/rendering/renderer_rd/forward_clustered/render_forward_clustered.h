@@ -55,6 +55,10 @@
 #define RB_TEX_VOXEL_GI SNAME("voxel_gi")
 #define RB_TEX_VOXEL_GI_MSAA SNAME("voxel_gi_msaa")
 
+namespace RendererRD {
+class MultiMeshCull;
+} // namespace RendererRD
+
 namespace RendererSceneRenderImplementation {
 
 class RenderForwardClustered : public RendererSceneRenderRD {
@@ -452,6 +456,11 @@ private:
 			bool flip_cull;
 
 			uint32_t uniform_buffer_index;
+
+			// View of the shadow, for culling MultiMesh instances.
+			bool cull_enabled = false;
+			Projection cull_projection;
+			Transform3D cull_transform;
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
@@ -586,6 +595,13 @@ private:
 		uint32_t gi_offset_cache = 0;
 		bool store_transform_cache = true;
 		RID transforms_uniform_set;
+		// Set while the main view draws this MultiMesh from its GPU culled copy (see _cull_multimeshes).
+		RID cull_transforms_uniform_set;
+		RID cull_command_buffer;
+		// The same for the shadow pass being drawn.
+		RID shadow_cull_transforms_uniform_set;
+		RID shadow_cull_command_buffer;
+		uint64_t shadow_cull_stamp = 0;
 		uint32_t instance_count = 0;
 		uint32_t trail_steps = 1;
 		bool can_sdfgi = false;
@@ -786,6 +802,11 @@ private:
 	/* Render shadows */
 
 	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D(), bool p_skip_render = false);
+	RendererRD::MultiMeshCull *multimesh_cull = nullptr;
+	uint64_t shadow_cull_serial = 0;
+	void _cull_multimeshes(const RenderDataRD *p_render_data);
+	bool _cull_multimesh(GeometryInstanceForwardClustered *p_instance, uint32_t p_slot, const Plane *p_frustum, uint32_t p_min_instances, uint64_t p_frame, RID &r_uniform_set, RID &r_command_buffer);
+
 	void _render_shadow_begin();
 	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_shadow_process();

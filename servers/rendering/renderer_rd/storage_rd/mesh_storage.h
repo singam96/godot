@@ -723,6 +723,17 @@ public:
 		return multimesh->uses_custom_data;
 	}
 
+	// What the GPU culling of a MultiMesh needs to know. Returns false if it cannot be culled.
+	struct MultiMeshCullInfo {
+		RID buffer;
+		RID mesh;
+		uint32_t stride_floats = 0; // Per instance, including colour and custom data.
+		uint32_t instance_count = 0;
+		uint32_t surface_count = 0;
+	};
+	bool multimesh_get_cull_info(RID p_multimesh, MultiMeshCullInfo &r_info) const;
+	uint32_t mesh_get_surface_vertices_drawn_count(RID p_mesh, uint32_t p_surface) const;
+
 	_FORCE_INLINE_ uint32_t multimesh_get_instances_to_draw(RID p_multimesh) const {
 		MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
 		ERR_FAIL_NULL_V(multimesh, 0);

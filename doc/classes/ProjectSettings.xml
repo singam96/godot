@@ -3261,6 +3261,10 @@
 			The maximum number of uniforms that can be used by the global shader uniform buffer. Each item takes up one slot. In other words, a single uniform float and a uniform vec4 will take the same amount of space in the buffer.
 			[b]Note:[/b] When using the Compatibility renderer, most mobile devices (and all web exports) will be limited to a maximum size of 1024 due to hardware constraints.
 		</member>
+		<member name="rendering/limits/multimesh/gpu_culling_min_instances" type="int" setter="" getter="" default="0">
+			If greater than [code]0[/code], [MultiMesh]es with at least this many instances are culled per instance on the GPU, so only the instances that are in view are drawn, both in the main view and in each shadow pass. [code]0[/code] disables it. The visible instances are copied to a second buffer every frame, which costs memory the size of the [MultiMesh]'s own instance buffer (and one more for the shadow passes).
+			Supported by the Forward+ renderer for 3D [MultiMesh]es. [MultiMesh]es that use indirect draws, motion vectors, or are drawn with multiview (XR) are not culled, and neither are objects drawn at a lower mesh level of detail than the first.
+		</member>
 		<member name="rendering/limits/opengl/max_decals" type="int" setter="" getter="" default="64">
 			Max number of decals that can be rendered in a frame. This is further limited by hardware support. Setting this low will reduce memory usage, may decrease shader compile times, and may result in faster rendering on low-end, mobile, or web devices.
 			[b]Note:[/b] This setting is only effective when using the Compatibility rendering method, not Forward+ and Mobile.

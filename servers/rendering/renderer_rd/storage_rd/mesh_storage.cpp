@@ -2546,3 +2546,32 @@ void MeshStorage::skeleton_update_dependency(RID p_skeleton, DependencyTracker *
 
 	p_instance->update_dependency(&skeleton->dependency);
 }
+
+bool MeshStorage::multimesh_get_cull_info(RID p_multimesh, MultiMeshCullInfo &r_info) const {
+	const MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+	if (multimesh == nullptr || !multimesh->buffer.is_valid() || !multimesh->mesh.is_valid()) {
+		return false;
+	}
+	// 2D instances, user supplied indirect draws and motion vectors (which need the previous frame's
+	// instance at the same index) keep the regular path.
+	if (multimesh->xform_format != RSE::MULTIMESH_TRANSFORM_3D || multimesh->indirect || multimesh->motion_vectors_enabled) {
+		return false;
+	}
+	const Mesh *mesh = mesh_owner.get_or_null(multimesh->mesh);
+	if (mesh == nullptr || mesh->surface_count == 0) {
+		return false;
+	}
+	r_info.buffer = multimesh->buffer;
+	r_info.mesh = multimesh->mesh;
+	r_info.stride_floats = multimesh->stride_cache;
+	r_info.instance_count = multimesh_get_instances_to_draw(p_multimesh);
+	r_info.surface_count = mesh->surface_count;
+	return r_info.instance_count > 0 && (r_info.stride_floats % 4) == 0;
+}
+
+uint32_t MeshStorage::mesh_get_surface_vertices_drawn_count(RID p_mesh, uint32_t p_surface) const {
+	const Mesh *mesh = mesh_owner.get_or_null(p_mesh);
+	ERR_FAIL_NULL_V(mesh, 0);
+	ERR_FAIL_UNSIGNED_INDEX_V(p_surface, mesh->surface_count, 0);
+	return mesh_surface_get_vertices_drawn_count(mesh->surfaces[p_surface]);
+}
