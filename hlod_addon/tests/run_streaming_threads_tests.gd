@@ -65,6 +65,7 @@ func _init() -> void:
 	var root_a := Node3D.new()
 	root.add_child(root_a)
 	var s := _setup(root_a)
+	s.incremental_children = false
 	Probe.created_on.clear()
 	await _idle(s)
 	var main_id := OS.get_main_thread_id()

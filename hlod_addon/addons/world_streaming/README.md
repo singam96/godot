@@ -28,9 +28,9 @@ streamer below the node that gets shifted.
   Without *Incremental Children* a single cell is never split, so keep cells small enough to add within a few milliseconds.
 - *Threaded Instantiate* (on by default) builds a cell's nodes on a worker thread, so only adding it to the tree is
   left for the main thread. Scripts on the cell's nodes must not touch the scene tree in `_init`.
-- *Incremental Children* (off by default) adds a cell's children a few per frame, and removes them the same way when
+- *Incremental Children* (on by default) adds a cell's children a few per frame, and removes them the same way when
   the cell is unloaded, so one big cell never costs a whole frame. It takes several frames for a cell to appear, and
-  `cell_loaded` is emitted when it is complete. Use it for dense cells (hundreds of nodes or more).
+  `cell_loaded` is emitted when it is complete. Turn it off if you need a cell to appear in a single frame; it only matters for cells with several children.
 - Measured on 9 cells of 1500 mesh nodes each (CPU only, headless): worst frame while loading 30 ms on the main
   thread, 9 ms with a worker thread, 8 ms with incremental children; worst frame while unloading 88 ms, 90 ms and 8 ms.
   Unloading only improves with *Incremental Children*. These are not GPU numbers: check your own scene with the Perf

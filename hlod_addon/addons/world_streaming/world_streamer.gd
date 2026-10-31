@@ -47,8 +47,9 @@ enum State { LOADING, PREWARM, LOADED, INSTANTIATING, PLACING }
 ## on the cell's nodes must be safe to create off the main thread (no touching the scene tree in _init).
 @export var threaded_instantiate := true
 ## Adds the children of a cell a few at a time (and removes them the same way), so one big cell never costs a whole
-## frame; it takes several frames to appear. Needs cells with many separate children to help.
-@export var incremental_children := false
+## frame; it takes several frames to appear. Needs cells with many separate children to help (cells with a single
+## child are placed at once). Turn it off if you need a cell to appear in one frame.
+@export var incremental_children := true
 
 var _cells := {}  ## "layer:x:z" -> {coord, layer, path, state, node}
 var _exists := {}  ## path -> bool
