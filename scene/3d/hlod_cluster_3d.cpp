@@ -33,12 +33,18 @@
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
+#include "core/math/triangle_mesh.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/object/worker_thread_pool.h"
+#include "core/os/os.h"
+#include "core/os/thread.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/hlod_material_atlas.h"
+#include "scene/3d/multimesh_instance_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
+#include "scene/resources/multimesh.h"
 #include "scene/resources/packed_scene.h"
 #include "scene/resources/surface_tool.h"
 #include "servers/rendering/rendering_server.h"
@@ -91,37 +97,11 @@ void _move_node_keeping_owner(Node *p_node, Node *p_new_parent) {
 	}
 }
 
-void _simplify_surface_arrays(Array &r_arrays, float p_ratio, float p_error) {
+// Replaces the triangles of a surface with `p_indices` and drops the vertices that are no longer referenced.
+void _replace_surface_indices(Array &r_arrays, const LocalVector<uint32_t> &p_indices, uint32_t p_index_count) {
 	const PackedVector3Array vertices = r_arrays[Mesh::ARRAY_VERTEX];
-	const PackedInt32Array indices = r_arrays[Mesh::ARRAY_INDEX];
 	const uint32_t vertex_count = vertices.size();
-	const uint32_t index_count = indices.size();
-	if (vertex_count == 0 || index_count < 3 || index_count % 3 != 0) {
-		return;
-	}
 
-	const size_t target_index_count = MAX((size_t)3, (size_t)(index_count * p_ratio) / 3 * 3);
-	if (target_index_count >= index_count) {
-		return;
-	}
-
-	LocalVector<float> positions;
-	positions.resize(vertex_count * 3);
-	for (uint32_t i = 0; i < vertex_count; i++) {
-		positions[i * 3 + 0] = vertices[i].x;
-		positions[i * 3 + 1] = vertices[i].y;
-		positions[i * 3 + 2] = vertices[i].z;
-	}
-
-	LocalVector<uint32_t> simplified;
-	simplified.resize(index_count);
-	float result_error = 0.0f;
-	const size_t new_index_count = SurfaceTool::simplify_func(simplified.ptr(), (const unsigned int *)indices.ptr(), index_count, positions.ptr(), vertex_count, sizeof(float) * 3, target_index_count, p_error, SurfaceTool::SIMPLIFY_PRUNE, &result_error);
-	if (new_index_count == 0) {
-		return;
-	}
-
-	// Drop the vertices that are no longer referenced.
 	LocalVector<int32_t> remap;
 	remap.resize(vertex_count);
 	for (uint32_t i = 0; i < vertex_count; i++) {
@@ -129,9 +109,9 @@ void _simplify_surface_arrays(Array &r_arrays, float p_ratio, float p_error) {
 	}
 	LocalVector<uint32_t> order;
 	PackedInt32Array new_indices;
-	new_indices.resize(new_index_count);
-	for (size_t i = 0; i < new_index_count; i++) {
-		const uint32_t v = simplified[i];
+	new_indices.resize(p_index_count);
+	for (uint32_t i = 0; i < p_index_count; i++) {
+		const uint32_t v = p_indices[i];
 		if (remap[v] < 0) {
 			remap[v] = order.size();
 			order.push_back(v);
@@ -170,6 +150,38 @@ void _simplify_surface_arrays(Array &r_arrays, float p_ratio, float p_error) {
 	r_arrays[Mesh::ARRAY_INDEX] = new_indices;
 }
 
+void _simplify_surface_arrays(Array &r_arrays, float p_ratio, float p_error) {
+	const PackedVector3Array vertices = r_arrays[Mesh::ARRAY_VERTEX];
+	const PackedInt32Array indices = r_arrays[Mesh::ARRAY_INDEX];
+	const uint32_t vertex_count = vertices.size();
+	const uint32_t index_count = indices.size();
+	if (vertex_count == 0 || index_count < 3 || index_count % 3 != 0) {
+		return;
+	}
+
+	const size_t target_index_count = MAX((size_t)3, (size_t)(index_count * p_ratio) / 3 * 3);
+	if (target_index_count >= index_count) {
+		return;
+	}
+
+	LocalVector<float> positions;
+	positions.resize(vertex_count * 3);
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		positions[i * 3 + 0] = vertices[i].x;
+		positions[i * 3 + 1] = vertices[i].y;
+		positions[i * 3 + 2] = vertices[i].z;
+	}
+
+	LocalVector<uint32_t> simplified;
+	simplified.resize(index_count);
+	float result_error = 0.0f;
+	const size_t new_index_count = SurfaceTool::simplify_func(simplified.ptr(), (const unsigned int *)indices.ptr(), index_count, positions.ptr(), vertex_count, sizeof(float) * 3, target_index_count, p_error, SurfaceTool::SIMPLIFY_PRUNE, &result_error);
+	if (new_index_count == 0) {
+		return;
+	}
+	_replace_surface_indices(r_arrays, simplified, new_index_count);
+}
+
 } // namespace
 
 void HLODCluster3D::_collect_geometry(Node *p_node, LocalVector<GeometryInstance3D *> &r_geometry, LocalVector<GeometryInstance3D *> *r_nested_proxies, bool p_descend_nested) const {
@@ -190,17 +202,6 @@ void HLODCluster3D::_collect_geometry(Node *p_node, LocalVector<GeometryInstance
 			r_geometry.push_back(geometry);
 		}
 		_collect_geometry(child, r_geometry, r_nested_proxies, p_descend_nested);
-	}
-}
-
-void HLODCluster3D::_collect_meshes(LocalVector<MeshInstance3D *> &r_meshes) const {
-	LocalVector<GeometryInstance3D *> geometry;
-	_collect_geometry(const_cast<HLODCluster3D *>(this), geometry, nullptr, true);
-	for (GeometryInstance3D *instance : geometry) {
-		MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(instance);
-		if (mesh_instance) {
-			r_meshes.push_back(mesh_instance);
-		}
 	}
 }
 
@@ -345,6 +346,14 @@ bool HLODCluster3D::get_merge_materials() const {
 	return merge_materials;
 }
 
+void HLODCluster3D::set_remove_hidden_faces(bool p_enabled) {
+	remove_hidden_faces = p_enabled;
+}
+
+bool HLODCluster3D::get_remove_hidden_faces() const {
+	return remove_hidden_faces;
+}
+
 void HLODCluster3D::set_atlas_cell_size(int p_size) {
 	atlas_cell_size = CLAMP(p_size, 16, 2048);
 }
@@ -392,68 +401,395 @@ Ref<Mesh> HLODCluster3D::get_proxy_mesh() const {
 	return proxy_mesh;
 }
 
-Error HLODCluster3D::generate_proxy() {
-	const bool simplify = simplify_ratio < 1.0f;
-	ERR_FAIL_COND_V_MSG(simplify && SurfaceTool::simplify_func == nullptr, ERR_UNAVAILABLE, "Generating an HLOD proxy with simplify_ratio below 1.0 requires the meshoptimizer module.");
-
-	LocalVector<MeshInstance3D *> meshes;
-	_collect_meshes(meshes);
-
-	// Gather the surfaces to merge together with the material they are drawn with.
+struct HLODCluster3D::BuildJob {
+	// Everything that the worker needs is read from the scene and the rendering server beforehand, because the worker must not call into either.
 	struct SourceSurface {
-		Ref<Mesh> mesh;
-		int surface = 0;
+		int arrays_index = 0; // Index in `source_arrays`.
 		Transform3D xform;
 		Ref<Material> material;
-		bool uvs_in_range = true;
 	};
 	LocalVector<SourceSurface> surfaces;
-	for (MeshInstance3D *mesh_instance : meshes) {
-		Ref<Mesh> mesh = mesh_instance->get_mesh();
-		Transform3D xform;
-		if (mesh.is_null() || !_get_relative_transform(mesh_instance, xform)) {
+	LocalVector<Array> source_arrays;
+	HashMap<Material *, Ref<Image>> albedo_images;
+
+	bool simplify = false;
+	bool merge_materials = true;
+	bool remove_hidden_faces = true;
+	float simplify_ratio = 1.0f;
+	float simplify_error = 0.1f;
+	int atlas_cell_size = 128;
+
+	// The result: surface arrays with their material, or the atlas (an index in `atlases`) that the material is replaced by.
+	struct ResultSurface {
+		Array arrays;
+		Ref<Material> material;
+		int atlas = -1;
+	};
+	struct Atlas {
+		Ref<Image> image;
+		Ref<StandardMaterial3D> material_template;
+	};
+	LocalVector<ResultSurface> result_surfaces;
+	LocalVector<Atlas> atlases;
+	Error error_code = OK;
+
+	// Progress is reported in per mille through stages, so that another thread can show it.
+	enum Stage {
+		STAGE_ATLAS,
+		STAGE_MERGE,
+		STAGE_HIDDEN_FACES,
+		STAGE_SIMPLIFY,
+		STAGE_MESH,
+		STAGE_DONE,
+	};
+	SafeNumeric<int> stage;
+	SafeNumeric<int> progress;
+	SafeFlag cancel;
+	SafeFlag done;
+	// The job runs on a thread of its own, so that it can in turn spread its work over the worker thread pool.
+	Thread thread;
+
+	void set_progress(Stage p_stage, float p_fraction = 0.0f) {
+		static const int starts[] = { 0, 150, 300, 700, 900, 1000 };
+		stage.set(p_stage);
+		progress.set(starts[p_stage] + int((starts[p_stage + 1] - starts[p_stage]) * CLAMP(p_fraction, 0.0f, 1.0f)));
+	}
+};
+
+void HLODCluster3D::_cull_hidden_faces(BuildJob *p_job, LocalVector<Array> &r_arrays, const LocalVector<bool> &p_occluders) {
+	// Only opaque triangles are tested and used as occluders. Transparent surfaces are always kept.
+	Vector<Vector3> faces;
+	LocalVector<Pair<uint32_t, uint32_t>> face_source;
+	AABB bounds;
+	bool has_bounds = false;
+	for (uint32_t b = 0; b < r_arrays.size(); b++) {
+		if (!p_occluders[b]) {
 			continue;
 		}
-		for (int surface = 0; surface < mesh->get_surface_count(); surface++) {
-			if (mesh->surface_get_primitive_type(surface) != Mesh::PRIMITIVE_TRIANGLES) {
-				continue;
+		const PackedVector3Array vertices = r_arrays[b][Mesh::ARRAY_VERTEX];
+		const PackedInt32Array indices = r_arrays[b][Mesh::ARRAY_INDEX];
+		for (int t = 0; t + 2 < indices.size(); t += 3) {
+			const Vector3 &v0 = vertices[indices[t]];
+			const Vector3 &v1 = vertices[indices[t + 1]];
+			const Vector3 &v2 = vertices[indices[t + 2]];
+			faces.push_back(v0);
+			faces.push_back(v1);
+			faces.push_back(v2);
+			face_source.push_back(Pair<uint32_t, uint32_t>(b, t / 3));
+			for (const Vector3 &v : { v0, v1, v2 }) {
+				if (has_bounds) {
+					bounds.expand_to(v);
+				} else {
+					bounds = AABB(v, Vector3());
+					has_bounds = true;
+				}
 			}
-			SourceSurface source;
-			source.mesh = mesh;
-			source.surface = surface;
-			source.xform = xform;
-			source.material = mesh_instance->get_material_override();
-			if (source.material.is_null()) {
-				source.material = mesh_instance->get_active_material(surface);
-			}
-			surfaces.push_back(source);
 		}
 	}
-	ERR_FAIL_COND_V_MSG(surfaces.is_empty(), ERR_DOES_NOT_EXIST, "HLODCluster3D has no visible MeshInstance3D descendants with triangle surfaces to merge.");
+	if (face_source.is_empty()) {
+		return;
+	}
+
+	Ref<TriangleMesh> occluder_mesh;
+	occluder_mesh.instantiate();
+	occluder_mesh->create(faces);
+	if (!occluder_mesh->is_valid()) {
+		return;
+	}
+
+	// A triangle is visible if, from any direction, the first thing a ray finds on its way to one of its sample points is the triangle itself.
+	LocalVector<Vector3> directions;
+	for (int x = -1; x <= 1; x++) {
+		for (int y = -1; y <= 1; y++) {
+			for (int z = -1; z <= 1; z++) {
+				if (x != 0 || y != 0 || z != 0) {
+					directions.push_back(Vector3(x, y, z).normalized());
+				}
+			}
+		}
+	}
+
+	// The rays of the triangles are independent, so they are spread over the worker threads.
+	struct CullContext {
+		BuildJob *job = nullptr;
+		const TriangleMesh *mesh = nullptr;
+		const Vector<Vector3> *faces = nullptr;
+		const LocalVector<Vector3> *directions = nullptr;
+		float distance = 0.0f;
+		float overshoot = 0.0f;
+		LocalVector<uint8_t> *visible = nullptr;
+		SafeNumeric<uint32_t> tested;
+
+		bool is_reached(const Vector3 &p_sample, const Vector3 &p_direction, int32_t p_face) const {
+			Vector3 point;
+			Vector3 hit_normal;
+			int32_t face_index = -1;
+			return mesh->intersect_segment(p_sample + p_direction * distance, p_sample - p_direction * overshoot, point, hit_normal, nullptr, &face_index) && face_index == p_face;
+		}
+
+		uint32_t total = 1;
+
+		void test_face(uint32_t p_face, void *p_unused) {
+			const uint32_t count = tested.increment();
+			if ((count & 63) == 0) {
+				job->set_progress(BuildJob::STAGE_HIDDEN_FACES, float(count) / total);
+			}
+			if (job->cancel.is_set()) {
+				return;
+			}
+			const Vector3 &v0 = (*faces)[p_face * 3];
+			const Vector3 &v1 = (*faces)[p_face * 3 + 1];
+			const Vector3 &v2 = (*faces)[p_face * 3 + 2];
+			const Vector3 normal = (v1 - v0).cross(v2 - v0).normalized();
+			const Vector3 center = (v0 + v1 + v2) / 3.0f;
+			const Vector3 corner_samples[3] = {
+				v0 * (2.0f / 3.0f) + v1 * (1.0f / 6.0f) + v2 * (1.0f / 6.0f),
+				v1 * (2.0f / 3.0f) + v2 * (1.0f / 6.0f) + v0 * (1.0f / 6.0f),
+				v2 * (2.0f / 3.0f) + v0 * (1.0f / 6.0f) + v1 * (1.0f / 6.0f),
+			};
+
+			(*visible)[p_face] = false;
+			if (normal.is_zero_approx()) {
+				// A triangle without area can't be seen.
+				return;
+			}
+			// Most triangles are found from the direction of their normal, so it is tried first. The center is tested from
+			// every direction, while the other sample points only catch triangles that are mostly hidden, so a few directions are enough for them.
+			if (is_reached(center, normal, p_face) || is_reached(center, -normal, p_face)) {
+				(*visible)[p_face] = true;
+				return;
+			}
+			for (const Vector3 &direction : *directions) {
+				if (is_reached(center, direction, p_face)) {
+					(*visible)[p_face] = true;
+					return;
+				}
+			}
+			static const Vector3 axes[6] = { Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, -1, 0), Vector3(0, 0, 1), Vector3(0, 0, -1) };
+			for (const Vector3 &sample : corner_samples) {
+				if (is_reached(sample, normal, p_face) || is_reached(sample, -normal, p_face)) {
+					(*visible)[p_face] = true;
+					return;
+				}
+				for (const Vector3 &axis : axes) {
+					if (is_reached(sample, axis, p_face)) {
+						(*visible)[p_face] = true;
+						return;
+					}
+				}
+			}
+		}
+	};
+
+	LocalVector<uint8_t> visible;
+	visible.resize(face_source.size());
+	CullContext context;
+	context.job = p_job;
+	context.mesh = occluder_mesh.ptr();
+	context.faces = &faces;
+	context.directions = &directions;
+	context.distance = bounds.size.length() * 1.5f + 1.0f;
+	context.overshoot = MAX(bounds.size.length() * 1e-3f, 1e-4f);
+	context.visible = &visible;
+	context.total = face_source.size();
+
+	const WorkerThreadPool::GroupID group = WorkerThreadPool::get_singleton()->add_template_group_task(&context, &CullContext::test_face, (void *)nullptr, face_source.size(), -1, false, "HLODCluster3D hidden face removal");
+	// Waiting lets this thread help with the work, which also keeps this safe when it is itself a worker.
+	WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group);
+	if (p_job->cancel.is_set()) {
+		return;
+	}
+
+	// Rebuild the index arrays of the surfaces that were tested.
+	LocalVector<LocalVector<uint32_t>> kept;
+	kept.resize(r_arrays.size());
+	for (uint32_t f = 0; f < face_source.size(); f++) {
+		if (!visible[f]) {
+			continue;
+		}
+		const PackedInt32Array indices = r_arrays[face_source[f].first][Mesh::ARRAY_INDEX];
+		for (int k = 0; k < 3; k++) {
+			kept[face_source[f].first].push_back(indices[face_source[f].second * 3 + k]);
+		}
+	}
+	for (uint32_t b = 0; b < r_arrays.size(); b++) {
+		if (p_occluders[b]) {
+			_replace_surface_indices(r_arrays[b], kept[b], kept[b].size());
+		}
+	}
+}
+
+namespace {
+
+// Surface data that is merged from several source surfaces.
+struct MergedSurface {
+	PackedVector3Array vertices;
+	PackedVector3Array normals;
+	PackedFloat32Array tangents;
+	PackedColorArray colors;
+	PackedVector2Array uvs;
+	PackedVector2Array uv2s;
+	PackedInt32Array indices;
+	bool has_normals = false;
+	bool has_tangents = false;
+	bool has_colors = false;
+	bool has_uvs = false;
+	bool has_uv2s = false;
+
+	// Appends an attribute of a source surface. Surfaces that lack the attribute get default values, and attributes that
+	// only later surfaces have are filled in for the earlier ones.
+	template <typename T, typename D, typename C>
+	static void append_attribute(T &r_dst, bool &r_has, const Variant &p_src, int p_previous_count, int p_count, int p_stride, D p_default, C p_convert) {
+		const bool src_has = p_src.get_type() != Variant::NIL;
+		if (!src_has && !r_has) {
+			return;
+		}
+		if (!r_has) {
+			r_has = true;
+			r_dst.resize(p_previous_count * p_stride);
+			for (int i = 0; i < p_previous_count * p_stride; i++) {
+				r_dst.write[i] = p_default();
+			}
+		}
+		const int old_size = r_dst.size();
+		r_dst.resize(old_size + p_count * p_stride);
+		if (src_has) {
+			const T src = p_src;
+			for (int i = 0; i < p_count * p_stride; i++) {
+				r_dst.write[old_size + i] = p_convert(src, i);
+			}
+		} else {
+			for (int i = 0; i < p_count * p_stride; i++) {
+				r_dst.write[old_size + i] = p_default();
+			}
+		}
+	}
+
+	void append(const Array &p_src, const Transform3D &p_xform, const Rect2 *p_atlas_rect) {
+		const PackedVector3Array src_vertices = p_src[Mesh::ARRAY_VERTEX];
+		const int count = src_vertices.size();
+		const int previous_count = vertices.size();
+		const Basis normal_basis = p_xform.basis.inverse().transposed();
+		const float tangent_flip = p_xform.basis.determinant() < 0 ? -1.0f : 1.0f;
+
+		vertices.resize(previous_count + count);
+		for (int i = 0; i < count; i++) {
+			vertices.write[previous_count + i] = p_xform.xform(src_vertices[i]);
+		}
+
+		append_attribute<PackedVector3Array>(
+				normals, has_normals, p_src[Mesh::ARRAY_NORMAL], previous_count, count, 1, []() { return Vector3(0, 1, 0); },
+				[&](const PackedVector3Array &p_array, int p_index) { return normal_basis.xform(p_array[p_index]).normalized(); });
+		append_attribute<PackedFloat32Array>(
+				tangents, has_tangents, p_src[Mesh::ARRAY_TANGENT], previous_count, count, 4, []() { return 0.0f; },
+				[&](const PackedFloat32Array &p_array, int p_index) {
+					const int base = p_index - (p_index % 4);
+					if (p_index % 4 == 3) {
+						return p_array[p_index] * tangent_flip;
+					}
+					const Vector3 tangent = p_xform.basis.xform(Vector3(p_array[base], p_array[base + 1], p_array[base + 2])).normalized();
+					return tangent[p_index % 4];
+				});
+		append_attribute<PackedColorArray>(
+				colors, has_colors, p_src[Mesh::ARRAY_COLOR], previous_count, count, 1, []() { return Color(1, 1, 1, 1); },
+				[](const PackedColorArray &p_array, int p_index) { return p_array[p_index]; });
+
+		if (p_atlas_rect) {
+			// The surface is drawn with the atlas: its UVs move into the rectangle of its material. Without UVs (a solid color), the center is used.
+			const Rect2 rect = *p_atlas_rect;
+			const Variant src_uvs = p_src[Mesh::ARRAY_TEX_UV];
+			append_attribute<PackedVector2Array>(
+					uvs, has_uvs, Variant(PackedVector2Array()), previous_count, 0, 1, []() { return Vector2(); },
+					[](const PackedVector2Array &p_array, int p_index) { return p_array[p_index]; });
+			has_uvs = true;
+			uvs.resize(previous_count + count);
+			const PackedVector2Array source = src_uvs.get_type() == Variant::NIL ? PackedVector2Array() : PackedVector2Array(src_uvs);
+			for (int i = 0; i < count; i++) {
+				uvs.write[previous_count + i] = rect.position + (source.is_empty() ? rect.size * 0.5f : source[i] * rect.size);
+			}
+		} else {
+			append_attribute<PackedVector2Array>(
+					uvs, has_uvs, p_src[Mesh::ARRAY_TEX_UV], previous_count, count, 1, []() { return Vector2(); },
+					[](const PackedVector2Array &p_array, int p_index) { return p_array[p_index]; });
+		}
+		append_attribute<PackedVector2Array>(
+				uv2s, has_uv2s, p_src[Mesh::ARRAY_TEX_UV2], previous_count, count, 1, []() { return Vector2(); },
+				[](const PackedVector2Array &p_array, int p_index) { return p_array[p_index]; });
+
+		const PackedInt32Array src_indices = p_src[Mesh::ARRAY_INDEX];
+		const int index_count = src_indices.is_empty() ? count : src_indices.size();
+		const int old_index_count = indices.size();
+		indices.resize(old_index_count + index_count);
+		for (int i = 0; i < index_count; i++) {
+			indices.write[old_index_count + i] = previous_count + (src_indices.is_empty() ? i : src_indices[i]);
+		}
+	}
+
+	Array to_arrays() const {
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		if (has_normals) {
+			arrays[Mesh::ARRAY_NORMAL] = normals;
+		}
+		if (has_tangents) {
+			arrays[Mesh::ARRAY_TANGENT] = tangents;
+		}
+		if (has_colors) {
+			arrays[Mesh::ARRAY_COLOR] = colors;
+		}
+		if (has_uvs) {
+			arrays[Mesh::ARRAY_TEX_UV] = uvs;
+		}
+		if (has_uv2s) {
+			arrays[Mesh::ARRAY_TEX_UV2] = uv2s;
+		}
+		arrays[Mesh::ARRAY_INDEX] = indices;
+		return arrays;
+	}
+};
+
+} // namespace
+
+void HLODCluster3D::_run_job(void *p_job) {
+	BuildJob *job = static_cast<BuildJob *>(p_job);
+	job->set_progress(BuildJob::STAGE_ATLAS);
 
 	// Bake groups of simple materials into texture atlases.
 	struct AtlasGroup {
 		String key;
 		Vector<Ref<StandardMaterial3D>> materials;
-		Ref<StandardMaterial3D> atlas_material;
+		Vector<Ref<Image>> images;
+		Ref<Image> atlas_image;
+		int atlas_index = -1;
 		Vector<Rect2> rects;
 	};
 	LocalVector<AtlasGroup> groups;
 	// For every surface, the atlas group (or -1) and the index of its material in that group.
 	LocalVector<Pair<int, int>> atlas_slots;
-	atlas_slots.resize(surfaces.size());
+	atlas_slots.resize(job->surfaces.size());
 	for (Pair<int, int> &slot : atlas_slots) {
 		slot = Pair<int, int>(-1, -1);
 	}
-	if (merge_materials) {
-		for (uint32_t i = 0; i < surfaces.size(); i++) {
-			const Ref<StandardMaterial3D> material = surfaces[i].material;
+
+	auto cancelled = [&]() {
+		if (job->cancel.is_set()) {
+			job->error_code = ERR_SKIP;
+			job->done.set();
+			return true;
+		}
+		return false;
+	};
+
+	if (job->merge_materials) {
+		for (uint32_t i = 0; i < job->surfaces.size(); i++) {
+			const BuildJob::SourceSurface &source = job->surfaces[i];
+			const Ref<StandardMaterial3D> material = source.material;
 			if (!HLODMaterialAtlas::is_eligible(material)) {
 				continue;
 			}
 			// Atlas UVs only work for surfaces whose UVs stay inside the 0..1 range.
-			const Array arrays = surfaces[i].mesh->surface_get_arrays(surfaces[i].surface);
-			const PackedVector2Array uvs = arrays[Mesh::ARRAY_TEX_UV];
+			const PackedVector2Array uvs = job->source_arrays[source.arrays_index][Mesh::ARRAY_TEX_UV];
 			bool in_range = true;
 			for (const Vector2 &uv : uvs) {
 				if (uv.x < -0.001f || uv.x > 1.001f || uv.y < -0.001f || uv.y > 1.001f) {
@@ -461,7 +797,8 @@ Error HLODCluster3D::generate_proxy() {
 					break;
 				}
 			}
-			if (!in_range || (uvs.is_empty() && material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid())) {
+			const bool textured = material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid();
+			if (!in_range || (textured && (uvs.is_empty() || !job->albedo_images.has(material.ptr())))) {
 				continue;
 			}
 
@@ -483,14 +820,29 @@ Error HLODCluster3D::generate_proxy() {
 			int material_index = group.materials.find(material);
 			if (material_index < 0) {
 				group.materials.push_back(material);
+				group.images.push_back(textured ? job->albedo_images[material.ptr()] : Ref<Image>());
 				material_index = group.materials.size() - 1;
 			}
 			atlas_slots[i] = Pair<int, int>(group_index, material_index);
 		}
-		for (AtlasGroup &group : groups) {
+		if (cancelled()) {
+			return;
+		}
+		for (uint32_t g = 0; g < groups.size(); g++) {
+			job->set_progress(BuildJob::STAGE_ATLAS, float(g) / groups.size());
 			// A single material gains nothing from an atlas.
-			if (group.materials.size() > 1) {
-				group.atlas_material = HLODMaterialAtlas::build(group.materials, atlas_cell_size, group.rects);
+			if (groups[g].materials.size() > 1) {
+				groups[g].atlas_image = HLODMaterialAtlas::build(groups[g].materials, groups[g].images, job->atlas_cell_size, groups[g].rects);
+				if (groups[g].atlas_image.is_valid()) {
+					groups[g].atlas_index = job->atlases.size();
+					BuildJob::Atlas atlas;
+					atlas.image = groups[g].atlas_image;
+					atlas.material_template = groups[g].materials[0];
+					job->atlases.push_back(atlas);
+				}
+			}
+			if (cancelled()) {
+				return;
 			}
 		}
 	}
@@ -499,13 +851,19 @@ Error HLODCluster3D::generate_proxy() {
 	struct Batch {
 		Ref<Material> material;
 		int atlas_group = -1;
-		Ref<SurfaceTool> tool;
+		MergedSurface surface;
 	};
 	LocalVector<Batch> batches;
-	for (uint32_t i = 0; i < surfaces.size(); i++) {
-		const SourceSurface &source = surfaces[i];
+	for (uint32_t i = 0; i < job->surfaces.size(); i++) {
+		if ((i & 15) == 0) {
+			job->set_progress(BuildJob::STAGE_MERGE, float(i) / job->surfaces.size());
+			if (cancelled()) {
+				return;
+			}
+		}
+		const BuildJob::SourceSurface &source = job->surfaces[i];
 		const int group_index = atlas_slots[i].first;
-		const bool atlased = group_index >= 0 && groups[group_index].atlas_material.is_valid();
+		const bool atlased = group_index >= 0 && groups[group_index].atlas_index >= 0;
 
 		Batch *batch = nullptr;
 		for (Batch &candidate : batches) {
@@ -518,39 +876,242 @@ Error HLODCluster3D::generate_proxy() {
 			batches.push_back(Batch());
 			batch = &batches[batches.size() - 1];
 			batch->atlas_group = atlased ? group_index : -1;
-			batch->material = atlased ? Ref<Material>(groups[group_index].atlas_material) : source.material;
-			batch->tool.instantiate();
-			batch->tool->begin(Mesh::PRIMITIVE_TRIANGLES);
+			batch->material = source.material;
 		}
 
-		const uint32_t first_vertex = batch->tool->get_vertex_array().size();
-		batch->tool->append_from(source.mesh, source.surface, source.xform);
 		if (atlased) {
 			const Rect2 rect = groups[group_index].rects[atlas_slots[i].second];
-			// Make sure the UV attribute exists even when the source surface has none (solid color materials).
-			batch->tool->set_uv(Vector2());
-			LocalVector<SurfaceTool::Vertex> &vertices = batch->tool->get_vertex_array();
-			const bool has_uvs = (uint64_t)source.mesh->surface_get_format(source.surface) & Mesh::ARRAY_FORMAT_TEX_UV;
-			for (uint32_t v = first_vertex; v < vertices.size(); v++) {
-				vertices[v].uv = rect.position + (has_uvs ? vertices[v].uv * rect.size : rect.size * 0.5f);
+			batch->surface.append(job->source_arrays[source.arrays_index], source.xform, &rect);
+		} else {
+			batch->surface.append(job->source_arrays[source.arrays_index], source.xform, nullptr);
+		}
+	}
+
+	LocalVector<Array> arrays;
+	LocalVector<bool> occluders;
+	for (Batch &batch : batches) {
+		arrays.push_back(batch.surface.to_arrays());
+		// Opaque surfaces hide what is behind them. Other shader types are unknown, so they are not assumed to be opaque.
+		Ref<Material> material = batch.material;
+		if (batch.atlas_group >= 0) {
+			material = groups[batch.atlas_group].materials[0];
+		}
+		const Ref<BaseMaterial3D> base_material = material;
+		occluders.push_back(material.is_null() || (base_material.is_valid() && base_material->get_transparency() == BaseMaterial3D::TRANSPARENCY_DISABLED));
+	}
+
+	if (job->remove_hidden_faces) {
+		job->set_progress(BuildJob::STAGE_HIDDEN_FACES);
+		_cull_hidden_faces(job, arrays, occluders);
+		if (cancelled()) {
+			return;
+		}
+	}
+
+	for (uint32_t i = 0; i < arrays.size(); i++) {
+		job->set_progress(BuildJob::STAGE_SIMPLIFY, float(i) / arrays.size());
+		if (cancelled()) {
+			return;
+		}
+		const PackedInt32Array indices = arrays[i][Mesh::ARRAY_INDEX];
+		if (indices.is_empty()) {
+			// Every triangle of this surface was hidden.
+			continue;
+		}
+		if (job->simplify) {
+			_simplify_surface_arrays(arrays[i], job->simplify_ratio, job->simplify_error);
+		}
+		BuildJob::ResultSurface result;
+		result.arrays = arrays[i];
+		result.material = batches[i].material;
+		result.atlas = batches[i].atlas_group >= 0 ? groups[batches[i].atlas_group].atlas_index : -1;
+		job->result_surfaces.push_back(result);
+	}
+
+	job->error_code = job->result_surfaces.is_empty() ? ERR_DOES_NOT_EXIST : OK;
+	job->set_progress(BuildJob::STAGE_DONE);
+	job->done.set();
+}
+
+Error HLODCluster3D::_start_job(bool p_threaded) {
+	ERR_FAIL_COND_V_MSG(job != nullptr, ERR_BUSY, "The HLOD proxy is already being generated.");
+	const bool simplify = simplify_ratio < 1.0f;
+	ERR_FAIL_COND_V_MSG(simplify && SurfaceTool::simplify_func == nullptr, ERR_UNAVAILABLE, "Generating an HLOD proxy with simplify_ratio below 1.0 requires the meshoptimizer module.");
+
+	// Read everything that is needed from the scene and the rendering server first, so that the worker does not touch them.
+	LocalVector<GeometryInstance3D *> geometry;
+	_collect_geometry(this, geometry, nullptr, true);
+
+	BuildJob *new_job = memnew(BuildJob);
+	new_job->simplify = simplify;
+	new_job->merge_materials = merge_materials;
+	new_job->remove_hidden_faces = remove_hidden_faces;
+	new_job->simplify_ratio = simplify_ratio;
+	new_job->simplify_error = simplify_error;
+	new_job->atlas_cell_size = atlas_cell_size;
+
+	HashMap<Mesh *, HashMap<int, int>> arrays_cache;
+	for (GeometryInstance3D *instance : geometry) {
+		Transform3D base_xform;
+		MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(instance);
+		MultiMeshInstance3D *multimesh_instance = Object::cast_to<MultiMeshInstance3D>(instance);
+		if (!mesh_instance && !multimesh_instance) {
+			continue;
+		}
+		if (!_get_relative_transform(instance, base_xform)) {
+			continue;
+		}
+
+		Ref<Mesh> mesh;
+		LocalVector<Transform3D> xforms;
+		if (mesh_instance) {
+			mesh = mesh_instance->get_mesh();
+			xforms.push_back(base_xform);
+		} else {
+			// Every instance of a MultiMesh (e.g. foliage) is merged in as its own copy of the mesh.
+			const Ref<MultiMesh> multimesh = multimesh_instance->get_multimesh();
+			if (multimesh.is_null() || multimesh->get_transform_format() != MultiMesh::TRANSFORM_3D) {
+				continue;
+			}
+			mesh = multimesh->get_mesh();
+			int count = multimesh->get_instance_count();
+			if (multimesh->get_visible_instance_count() >= 0) {
+				count = MIN(count, multimesh->get_visible_instance_count());
+			}
+			for (int i = 0; i < count; i++) {
+				xforms.push_back(base_xform * multimesh->get_instance_transform(i));
+			}
+		}
+		if (mesh.is_null()) {
+			continue;
+		}
+
+		for (int surface = 0; surface < mesh->get_surface_count(); surface++) {
+			if (mesh->surface_get_primitive_type(surface) != Mesh::PRIMITIVE_TRIANGLES) {
+				continue;
+			}
+			Ref<Material> material = instance->get_material_override();
+			if (material.is_null()) {
+				material = mesh_instance ? mesh_instance->get_active_material(surface) : mesh->surface_get_material(surface);
+			}
+
+			HashMap<int, int> &mesh_cache = arrays_cache[mesh.ptr()];
+			if (!mesh_cache.has(surface)) {
+				mesh_cache[surface] = new_job->source_arrays.size();
+				new_job->source_arrays.push_back(mesh->surface_get_arrays(surface));
+			}
+			const int arrays_index = mesh_cache[surface];
+
+			// The images of the albedo textures are needed for the atlas.
+			const Ref<StandardMaterial3D> standard_material = material;
+			if (merge_materials && standard_material.is_valid() && !new_job->albedo_images.has(standard_material.ptr()) && HLODMaterialAtlas::is_eligible(standard_material)) {
+				const Ref<Texture2D> texture = standard_material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+				if (texture.is_valid()) {
+					const Ref<Image> image = texture->get_image();
+					if (image.is_valid()) {
+						new_job->albedo_images[standard_material.ptr()] = image;
+					}
+				}
+			}
+
+			for (const Transform3D &xform : xforms) {
+				BuildJob::SourceSurface source;
+				source.arrays_index = arrays_index;
+				source.xform = xform;
+				source.material = material;
+				new_job->surfaces.push_back(source);
 			}
 		}
 	}
-
-	Ref<ArrayMesh> result;
-	result.instantiate();
-	for (Batch &batch : batches) {
-		batch.tool->index();
-		Array arrays = batch.tool->commit_to_arrays();
-		if (simplify) {
-			_simplify_surface_arrays(arrays, simplify_ratio, simplify_error);
-		}
-		result->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-		result->surface_set_material(result->get_surface_count() - 1, batch.material);
+	if (new_job->surfaces.is_empty()) {
+		memdelete(new_job);
+		return ERR_DOES_NOT_EXIST;
 	}
 
-	set_proxy_mesh(result);
+	job = new_job;
+	if (p_threaded) {
+		job->thread.start(&HLODCluster3D::_run_job, job);
+	} else {
+		_run_job(job);
+	}
 	return OK;
+}
+
+Error HLODCluster3D::generate_proxy() {
+	const Error err = _start_job(false);
+	if (err != OK) {
+		return err;
+	}
+	return finish_generation();
+}
+
+Error HLODCluster3D::generate_proxy_async() {
+	return _start_job(true);
+}
+
+bool HLODCluster3D::is_generating() const {
+	return job != nullptr && !job->done.is_set();
+}
+
+float HLODCluster3D::get_generation_progress() const {
+	if (!job) {
+		return 0.0f;
+	}
+	return job->progress.get() / 1000.0f;
+}
+
+String HLODCluster3D::get_generation_status() const {
+	if (!job) {
+		return String();
+	}
+	switch (job->stage.get()) {
+		case BuildJob::STAGE_ATLAS:
+			return RTR("Baking the material atlas...");
+		case BuildJob::STAGE_MERGE:
+			return RTR("Merging meshes...");
+		case BuildJob::STAGE_HIDDEN_FACES:
+			return RTR("Removing hidden faces...");
+		case BuildJob::STAGE_SIMPLIFY:
+			return RTR("Simplifying...");
+		default:
+			return RTR("Finishing...");
+	}
+}
+
+void HLODCluster3D::cancel_generation() {
+	if (job) {
+		job->cancel.set();
+	}
+}
+
+Error HLODCluster3D::finish_generation() {
+	ERR_FAIL_NULL_V_MSG(job, ERR_UNCONFIGURED, "The HLOD proxy generation was not started.");
+	if (job->thread.is_started()) {
+		job->thread.wait_to_finish();
+	}
+	const Error err = job->error_code;
+
+	// The meshes, textures and materials are created here, because they need the rendering server.
+	Ref<ArrayMesh> result;
+	if (err == OK) {
+		LocalVector<Ref<StandardMaterial3D>> atlas_materials;
+		for (const BuildJob::Atlas &atlas : job->atlases) {
+			atlas_materials.push_back(HLODMaterialAtlas::create_material(atlas.material_template, atlas.image));
+		}
+		result.instantiate();
+		for (const BuildJob::ResultSurface &surface : job->result_surfaces) {
+			result->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, surface.arrays);
+			result->surface_set_material(result->get_surface_count() - 1, surface.atlas >= 0 ? Ref<Material>(atlas_materials[surface.atlas]) : surface.material);
+		}
+	}
+
+	memdelete(job);
+	job = nullptr;
+
+	if (err == OK) {
+		set_proxy_mesh(result);
+	}
+	return err;
 }
 
 Error HLODCluster3D::build_grid(float p_cell_size) {
@@ -767,6 +1328,8 @@ void HLODCluster3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_simplify_error"), &HLODCluster3D::get_simplify_error);
 	ClassDB::bind_method(D_METHOD("set_merge_materials", "enabled"), &HLODCluster3D::set_merge_materials);
 	ClassDB::bind_method(D_METHOD("get_merge_materials"), &HLODCluster3D::get_merge_materials);
+	ClassDB::bind_method(D_METHOD("set_remove_hidden_faces", "enabled"), &HLODCluster3D::set_remove_hidden_faces);
+	ClassDB::bind_method(D_METHOD("get_remove_hidden_faces"), &HLODCluster3D::get_remove_hidden_faces);
 	ClassDB::bind_method(D_METHOD("set_atlas_cell_size", "size"), &HLODCluster3D::set_atlas_cell_size);
 	ClassDB::bind_method(D_METHOD("get_atlas_cell_size"), &HLODCluster3D::get_atlas_cell_size);
 	ClassDB::bind_method(D_METHOD("set_detail_scene_path", "path"), &HLODCluster3D::set_detail_scene_path);
@@ -779,6 +1342,12 @@ void HLODCluster3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_proxy_mesh"), &HLODCluster3D::get_proxy_mesh);
 
 	ClassDB::bind_method(D_METHOD("generate_proxy"), &HLODCluster3D::generate_proxy);
+	ClassDB::bind_method(D_METHOD("generate_proxy_async"), &HLODCluster3D::generate_proxy_async);
+	ClassDB::bind_method(D_METHOD("is_generating"), &HLODCluster3D::is_generating);
+	ClassDB::bind_method(D_METHOD("get_generation_progress"), &HLODCluster3D::get_generation_progress);
+	ClassDB::bind_method(D_METHOD("get_generation_status"), &HLODCluster3D::get_generation_status);
+	ClassDB::bind_method(D_METHOD("cancel_generation"), &HLODCluster3D::cancel_generation);
+	ClassDB::bind_method(D_METHOD("finish_generation"), &HLODCluster3D::finish_generation);
 	ClassDB::bind_method(D_METHOD("build_grid", "cell_size"), &HLODCluster3D::build_grid);
 	ClassDB::bind_method(D_METHOD("store_detail_scene", "path"), &HLODCluster3D::store_detail_scene);
 	ClassDB::bind_method(D_METHOD("update_streaming"), &HLODCluster3D::update_streaming);
@@ -791,6 +1360,7 @@ void HLODCluster3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simplify_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_simplify_ratio", "get_simplify_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "simplify_error", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_simplify_error", "get_simplify_error");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "merge_materials"), "set_merge_materials", "get_merge_materials");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "remove_hidden_faces"), "set_remove_hidden_faces", "get_remove_hidden_faces");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "atlas_cell_size", PROPERTY_HINT_RANGE, "16,2048,1,suffix:px"), "set_atlas_cell_size", "get_atlas_cell_size");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "proxy_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_proxy_mesh", "get_proxy_mesh");
 
@@ -804,4 +1374,14 @@ HLODCluster3D::HLODCluster3D() {
 	proxy = memnew(MeshInstance3D);
 	add_child(proxy, false, INTERNAL_MODE_BACK);
 	_update_proxy();
+}
+
+HLODCluster3D::~HLODCluster3D() {
+	if (job) {
+		job->cancel.set();
+		if (job->thread.is_started()) {
+			job->thread.wait_to_finish();
+		}
+		memdelete(job);
+	}
 }

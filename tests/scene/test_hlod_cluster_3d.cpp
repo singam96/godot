@@ -39,6 +39,7 @@ TEST_FORCE_LINK(test_hlod_cluster_3d)
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/hlod_cluster_3d.h"
 #include "scene/3d/mesh_instance_3d.h"
+#include "scene/3d/multimesh_instance_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 #include "scene/resources/3d/primitive_meshes.h"
@@ -61,6 +62,21 @@ static int _index_count(const Ref<Mesh> &p_mesh) {
 static MeshInstance3D *_add_sphere(HLODCluster3D *p_cluster, const Vector3 &p_position, const Ref<Material> &p_material = Ref<Material>()) {
 	Ref<SphereMesh> sphere;
 	sphere.instantiate();
+	sphere->set_radial_segments(32);
+	sphere->set_rings(16);
+	MeshInstance3D *instance = memnew(MeshInstance3D);
+	instance->set_mesh(sphere);
+	instance->set_material_override(p_material);
+	instance->set_position(p_position);
+	p_cluster->add_child(instance);
+	return instance;
+}
+
+static MeshInstance3D *_add_sized_sphere(HLODCluster3D *p_cluster, const Vector3 &p_position, float p_radius, const Ref<Material> &p_material = Ref<Material>()) {
+	Ref<SphereMesh> sphere;
+	sphere.instantiate();
+	sphere->set_radius(p_radius);
+	sphere->set_height(p_radius * 2.0f);
 	sphere->set_radial_segments(32);
 	sphere->set_rings(16);
 	MeshInstance3D *instance = memnew(MeshInstance3D);
@@ -101,6 +117,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Generating the proxy mesh") {
 
 	SUBCASE("Without simplification all source geometry is merged") {
 		cluster->set_simplify_ratio(1.0f);
+		cluster->set_remove_hidden_faces(false);
 		CHECK(cluster->generate_proxy() == OK);
 		REQUIRE(cluster->get_proxy_mesh().is_valid());
 		CHECK(cluster->get_proxy_mesh()->get_surface_count() == 1);
@@ -120,6 +137,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Generating the proxy mesh") {
 
 	SUBCASE("Clearing the proxy removes the mesh") {
 		cluster->set_simplify_ratio(1.0f);
+		cluster->set_remove_hidden_faces(false);
 		REQUIRE(cluster->generate_proxy() == OK);
 		cluster->clear_proxy();
 		CHECK(cluster->get_proxy_mesh().is_null());
@@ -145,6 +163,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Surfaces are batched per material") {
 	SceneTree::get_singleton()->get_root()->add_child(cluster);
 
 	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
 	REQUIRE(cluster->generate_proxy() == OK);
 	Ref<Mesh> proxy = cluster->get_proxy_mesh();
 	REQUIRE(proxy.is_valid());
@@ -172,12 +191,14 @@ TEST_CASE("[SceneTree][HLODCluster3D] Nested clusters") {
 
 	SUBCASE("The outer proxy merges the geometry of nested clusters") {
 		outer->set_simplify_ratio(1.0f);
+		outer->set_remove_hidden_faces(false);
 		REQUIRE(outer->generate_proxy() == OK);
 		CHECK(_index_count(outer->get_proxy_mesh()) == _index_count(reference) * 3);
 	}
 
 	SUBCASE("The inner proxy only merges its own geometry") {
 		inner->set_simplify_ratio(1.0f);
+		inner->set_remove_hidden_faces(false);
 		REQUIRE(inner->generate_proxy() == OK);
 		CHECK(_index_count(inner->get_proxy_mesh()) == _index_count(reference) * 2);
 		CHECK(outer->get_proxy_mesh().is_null());
@@ -190,6 +211,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Nested clusters") {
 TEST_CASE("[SceneTree][HLODCluster3D] Building a grid") {
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
 	cluster->set_switch_distance(80.0f);
 	_add_sphere(cluster, Vector3(1, 0, 1));
 	_add_sphere(cluster, Vector3(2, 0, 2));
@@ -254,6 +276,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Materials are baked into an atlas") {
 
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
 	cluster->set_atlas_cell_size(32);
 	_add_sphere(cluster, Vector3(0, 0, 0), red);
 	_add_sphere(cluster, Vector3(3, 0, 0), blue);
@@ -309,6 +332,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Materials are baked into an atlas") {
 TEST_CASE("[SceneTree][HLODCluster3D] Generating a proxy outside of the scene tree") {
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
 	MeshInstance3D *shown = _add_sphere(cluster, Vector3(0, 0, 0));
 	MeshInstance3D *hidden = _add_sphere(cluster, Vector3(3, 0, 0));
 	hidden->set_visible(false);
@@ -335,6 +359,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Streaming the detail scene") {
 
 	HLODCluster3D *cluster = memnew(HLODCluster3D);
 	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
 	cluster->set_switch_distance(10.0f);
 	cluster->set_switch_margin(0.0f);
 	cluster->set_stream_load_margin(5.0f);
@@ -386,6 +411,7 @@ TEST_CASE("[SceneTree][HLODCluster3D] Grid cells of a scene root keep the scene 
 	// This is the situation while importing: the cluster is the root of a scene that is not in the tree.
 	HLODCluster3D *root = memnew(HLODCluster3D);
 	root->set_simplify_ratio(1.0f);
+	root->set_remove_hidden_faces(false);
 	MeshInstance3D *first = _add_sphere(root, Vector3(1, 0, 1));
 	MeshInstance3D *second = _add_sphere(root, Vector3(30, 0, 1));
 	first->set_owner(root);
@@ -413,6 +439,229 @@ TEST_CASE("[SceneTree][HLODCluster3D] Grid cells of a scene root keep the scene 
 	memdelete(instance);
 
 	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][HLODCluster3D] Hidden faces are removed") {
+	// The triangles of a sphere that are visible. The degenerate triangles at the poles are not part of them.
+	int sphere_index_count = 0;
+	{
+		HLODCluster3D *single = memnew(HLODCluster3D);
+		single->set_simplify_ratio(1.0f);
+		_add_sized_sphere(single, Vector3(), 1.0f);
+		SceneTree::get_singleton()->get_root()->add_child(single);
+		REQUIRE(single->generate_proxy() == OK);
+		sphere_index_count = _index_count(single->get_proxy_mesh());
+		SceneTree::get_singleton()->get_root()->remove_child(single);
+		memdelete(single);
+	}
+	REQUIRE(sphere_index_count > 0);
+
+	HLODCluster3D *cluster = memnew(HLODCluster3D);
+	cluster->set_simplify_ratio(1.0f);
+	_add_sized_sphere(cluster, Vector3(), 5.0f);
+	_add_sized_sphere(cluster, Vector3(), 1.0f);
+	_add_sized_sphere(cluster, Vector3(20, 0, 0), 1.0f);
+	SceneTree::get_singleton()->get_root()->add_child(cluster);
+
+	SUBCASE("A sphere inside another one is dropped, separate spheres are kept") {
+		REQUIRE(cluster->generate_proxy() == OK);
+		CHECK(_index_count(cluster->get_proxy_mesh()) == sphere_index_count * 2);
+	}
+
+	SUBCASE("Keeping hidden faces merges everything") {
+		cluster->set_remove_hidden_faces(false);
+		REQUIRE(cluster->generate_proxy() == OK);
+		CHECK(_index_count(cluster->get_proxy_mesh()) > sphere_index_count * 3);
+	}
+
+	SceneTree::get_singleton()->get_root()->remove_child(cluster);
+	memdelete(cluster);
+
+	// Transparent geometry does not hide what is behind it.
+	Ref<StandardMaterial3D> glass;
+	glass.instantiate();
+	glass->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+	cluster = memnew(HLODCluster3D);
+	cluster->set_simplify_ratio(1.0f);
+	_add_sized_sphere(cluster, Vector3(), 5.0f, glass);
+	_add_sized_sphere(cluster, Vector3(), 1.0f);
+	SceneTree::get_singleton()->get_root()->add_child(cluster);
+	REQUIRE(cluster->generate_proxy() == OK);
+	// The inner sphere is kept in full, and the glass is not tested at all.
+	CHECK(cluster->get_proxy_mesh()->get_surface_count() == 2);
+	CHECK(_index_count(cluster->get_proxy_mesh()) > sphere_index_count * 2);
+	SceneTree::get_singleton()->get_root()->remove_child(cluster);
+	memdelete(cluster);
+}
+
+TEST_CASE("[SceneTree][HLODCluster3D] MultiMesh instances are merged") {
+	Ref<BoxMesh> box;
+	box.instantiate();
+	Ref<ArrayMesh> reference;
+	reference.instantiate();
+	reference->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, box->get_mesh_arrays());
+	const int box_index_count = _index_count(reference);
+
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+	multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+	multimesh->set_mesh(box);
+	multimesh->set_instance_count(20);
+	for (int i = 0; i < 20; i++) {
+		multimesh->set_instance_transform(i, Transform3D(Basis(), Vector3(i * 3.0f, 0, 0)));
+	}
+
+	HLODCluster3D *cluster = memnew(HLODCluster3D);
+	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
+	MultiMeshInstance3D *foliage = memnew(MultiMeshInstance3D);
+	foliage->set_multimesh(multimesh);
+	foliage->set_position(Vector3(0, 2, 0));
+	cluster->add_child(foliage);
+	SceneTree::get_singleton()->get_root()->add_child(cluster);
+
+	REQUIRE(cluster->generate_proxy() == OK);
+	CHECK(_index_count(cluster->get_proxy_mesh()) == box_index_count * 20);
+	// The transform of the MultiMeshInstance3D is applied. (The headless renderer does not store the transforms of the individual instances.)
+	const AABB aabb = cluster->get_proxy_mesh()->get_aabb();
+	CHECK(aabb.position.y == doctest::Approx(1.5f));
+
+	multimesh->set_visible_instance_count(5);
+	REQUIRE(cluster->generate_proxy() == OK);
+	CHECK(_index_count(cluster->get_proxy_mesh()) == box_index_count * 5);
+
+	SceneTree::get_singleton()->get_root()->remove_child(cluster);
+	memdelete(cluster);
+}
+
+TEST_CASE("[SceneTree][HLODCluster3D] Generating in the background") {
+	HLODCluster3D *cluster = memnew(HLODCluster3D);
+	cluster->set_simplify_ratio(0.5f);
+	for (int i = 0; i < 12; i++) {
+		_add_sphere(cluster, Vector3(i * 3.0f, 0, 0));
+	}
+	SceneTree::get_singleton()->get_root()->add_child(cluster);
+
+	SUBCASE("The result matches the synchronous generation") {
+		REQUIRE(cluster->generate_proxy() == OK);
+		const int expected = _index_count(cluster->get_proxy_mesh());
+		cluster->clear_proxy();
+
+		REQUIRE(cluster->generate_proxy_async() == OK);
+		CHECK(cluster->get_generation_status() != String());
+		// Only one generation can run at a time.
+		ERR_PRINT_OFF;
+		CHECK(cluster->generate_proxy_async() == ERR_BUSY);
+		ERR_PRINT_ON;
+		for (int i = 0; i < 1000 && cluster->is_generating(); i++) {
+			OS::get_singleton()->delay_usec(5000);
+		}
+		CHECK_FALSE(cluster->is_generating());
+		CHECK(cluster->get_generation_progress() == doctest::Approx(1.0f));
+		REQUIRE(cluster->finish_generation() == OK);
+		REQUIRE(cluster->get_proxy_mesh().is_valid());
+		CHECK(_index_count(cluster->get_proxy_mesh()) == expected);
+	}
+
+	SUBCASE("Cancelling does not apply a result") {
+		REQUIRE(cluster->generate_proxy_async() == OK);
+		cluster->cancel_generation();
+		const Error err = cluster->finish_generation();
+		// The job may have been done before the request arrived.
+		CHECK((err == ERR_SKIP || err == OK));
+		if (err == ERR_SKIP) {
+			CHECK(cluster->get_proxy_mesh().is_null());
+		}
+		CHECK_FALSE(cluster->is_generating());
+		ERR_PRINT_OFF;
+		CHECK(cluster->finish_generation() == ERR_UNCONFIGURED);
+		ERR_PRINT_ON;
+	}
+
+	SUBCASE("Freeing the cluster while generating is safe") {
+		REQUIRE(cluster->generate_proxy_async() == OK);
+	}
+
+	SceneTree::get_singleton()->get_root()->remove_child(cluster);
+	memdelete(cluster);
+}
+
+TEST_CASE("[SceneTree][HLODCluster3D] Switching parameters reach the proxy") {
+	HLODCluster3D *cluster = memnew(HLODCluster3D);
+	// The proxy is an internal child, so it is not part of the regular children.
+	CHECK(cluster->get_child_count(false) == 0);
+	REQUIRE(cluster->get_child_count(true) == 1);
+	MeshInstance3D *proxy = Object::cast_to<MeshInstance3D>(cluster->get_child(0, true));
+	REQUIRE(proxy != nullptr);
+
+	cluster->set_switch_distance(120.0f);
+	cluster->set_switch_margin(12.0f);
+	cluster->set_fade_mode(GeometryInstance3D::VISIBILITY_RANGE_FADE_DEPENDENCIES);
+	// The proxy is drawn beyond the switch distance, and the margin is the width of the transition.
+	CHECK(proxy->get_visibility_range_begin() == doctest::Approx(120.0f));
+	CHECK(proxy->get_visibility_range_begin_margin() == doctest::Approx(12.0f));
+	CHECK(proxy->get_visibility_range_end() == doctest::Approx(0.0f));
+	CHECK(proxy->get_visibility_range_fade_mode() == GeometryInstance3D::VISIBILITY_RANGE_FADE_DEPENDENCIES);
+
+	// Generated proxies are assigned to that node.
+	_add_sphere(cluster, Vector3());
+	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
+	REQUIRE(cluster->generate_proxy() == OK);
+	CHECK(proxy->get_mesh() == cluster->get_proxy_mesh());
+	cluster->clear_proxy();
+	CHECK(proxy->get_mesh().is_null());
+
+	memdelete(cluster);
+}
+
+TEST_CASE("[SceneTree][HLODCluster3D] Streaming margins with mock distances") {
+	Camera3D *camera = memnew(Camera3D);
+	SceneTree::get_singleton()->get_root()->add_child(camera);
+	camera->make_current();
+
+	HLODCluster3D *cluster = memnew(HLODCluster3D);
+	cluster->set_simplify_ratio(1.0f);
+	cluster->set_remove_hidden_faces(false);
+	cluster->set_switch_distance(10.0f);
+	cluster->set_switch_margin(2.0f);
+	cluster->set_stream_load_margin(5.0f); // Loads within 10 + 2 + 5 = 17 m.
+	cluster->set_stream_unload_margin(10.0f); // Unloads beyond 10 + 2 + 10 = 22 m.
+	_add_sphere(cluster, Vector3());
+	SceneTree::get_singleton()->get_root()->add_child(cluster);
+	const String path = TestUtils::get_temp_path("hlod_margin_test.tscn");
+	REQUIRE(cluster->store_detail_scene(path) == OK);
+
+	auto set_distance = [&](float p_distance) {
+		camera->set_global_position(Vector3(0, 0, p_distance));
+		cluster->update_streaming();
+	};
+	auto wait_for_load = [&]() {
+		for (int i = 0; i < 500 && cluster->get_child_count(false) == 0; i++) {
+			cluster->update_streaming();
+			OS::get_singleton()->delay_usec(10000);
+		}
+	};
+
+	set_distance(17.5f);
+	CHECK(cluster->get_child_count(false) == 0);
+	set_distance(16.5f);
+	wait_for_load();
+	REQUIRE(cluster->get_child_count(false) == 1);
+	Node *detail = cluster->get_child(0, false);
+
+	// Between the load and unload distances the detail scene stays loaded, which avoids loading it over and over again.
+	for (const float distance : { 18.0f, 20.0f, 21.9f, 12.0f, 3.0f }) {
+		set_distance(distance);
+		CHECK_FALSE(detail->is_queued_for_deletion());
+	}
+	set_distance(22.1f);
+	CHECK(detail->is_queued_for_deletion());
+
+	SceneTree::get_singleton()->get_root()->remove_child(cluster);
+	memdelete(cluster);
+	SceneTree::get_singleton()->get_root()->remove_child(camera);
+	memdelete(camera);
 }
 
 TEST_CASE("[SceneTree][HLODCluster3D] Generating without geometry fails") {

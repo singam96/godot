@@ -47,6 +47,7 @@ private:
 	float simplify_ratio = 0.25f;
 	float simplify_error = 0.1f;
 	bool merge_materials = true;
+	bool remove_hidden_faces = true;
 	int atlas_cell_size = 128;
 	Ref<Mesh> proxy_mesh;
 
@@ -70,12 +71,19 @@ private:
 	// Gathers the geometry that belongs to this cluster. Nested clusters manage their own geometry: their proxies are
 	// reported in `r_nested_proxies`, and their geometry is only reported when `p_descend_nested` is set (used for merging).
 	void _collect_geometry(Node *p_node, LocalVector<GeometryInstance3D *> &r_geometry, LocalVector<GeometryInstance3D *> *r_nested_proxies, bool p_descend_nested) const;
-	void _collect_meshes(LocalVector<MeshInstance3D *> &r_meshes) const;
 	void _update_proxy();
 	void _link_children();
 	void _unlink_children();
 	void _queue_relink();
 	bool _get_relative_transform(Node3D *p_node, Transform3D &r_xform) const;
+
+	// Generating a proxy is split in a part that reads the scene (on the calling thread) and a part that
+	// only works on the gathered data, which can run on a worker thread.
+	struct BuildJob;
+	BuildJob *job = nullptr;
+	Error _start_job(bool p_threaded);
+	static void _run_job(void *p_job);
+	static void _cull_hidden_faces(BuildJob *p_job, LocalVector<Array> &r_arrays, const LocalVector<bool> &p_occluders);
 
 protected:
 	void _notification(int p_what);
@@ -112,10 +120,19 @@ public:
 	void set_stream_unload_margin(float p_margin);
 	float get_stream_unload_margin() const;
 
+	void set_remove_hidden_faces(bool p_enabled);
+	bool get_remove_hidden_faces() const;
+
 	void set_proxy_mesh(const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_proxy_mesh() const;
 
 	Error generate_proxy();
+	Error generate_proxy_async();
+	bool is_generating() const;
+	float get_generation_progress() const;
+	String get_generation_status() const;
+	void cancel_generation();
+	Error finish_generation();
 	Error build_grid(float p_cell_size);
 	Error store_detail_scene(const String &p_path);
 	void update_streaming();
@@ -125,4 +142,5 @@ public:
 	PackedStringArray get_configuration_warnings() const override;
 
 	HLODCluster3D();
+	~HLODCluster3D();
 };

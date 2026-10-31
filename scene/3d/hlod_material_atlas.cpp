@@ -68,9 +68,9 @@ String HLODMaterialAtlas::get_group_key(const Ref<StandardMaterial3D> &p_materia
 	return key;
 }
 
-Ref<StandardMaterial3D> HLODMaterialAtlas::build(const Vector<Ref<StandardMaterial3D>> &p_materials, int p_cell_size, Vector<Rect2> &r_rects) {
+Ref<Image> HLODMaterialAtlas::build(const Vector<Ref<StandardMaterial3D>> &p_materials, const Vector<Ref<Image>> &p_images, int p_cell_size, Vector<Rect2> &r_rects) {
 	r_rects.clear();
-	ERR_FAIL_COND_V(p_materials.is_empty(), Ref<StandardMaterial3D>());
+	ERR_FAIL_COND_V(p_materials.is_empty() || p_materials.size() != p_images.size(), Ref<Image>());
 
 	const int count = p_materials.size();
 	const int columns = Math::ceil(Math::sqrt((double)count));
@@ -81,25 +81,23 @@ Ref<StandardMaterial3D> HLODMaterialAtlas::build(const Vector<Ref<StandardMateri
 	while (cell > 16 && (columns * cell > 8192 || rows * cell > 8192)) {
 		cell /= 2;
 	}
-	ERR_FAIL_COND_V_MSG(columns * cell > Image::MAX_WIDTH || rows * cell > Image::MAX_HEIGHT, Ref<StandardMaterial3D>(), "Too many materials to bake into a texture atlas.");
+	ERR_FAIL_COND_V_MSG(columns * cell > Image::MAX_WIDTH || rows * cell > Image::MAX_HEIGHT, Ref<Image>(), "Too many materials to bake into a texture atlas.");
 
 	const int inner = cell - 2 * PADDING;
 	Ref<Image> atlas = Image::create_empty(columns * cell, rows * cell, false, Image::FORMAT_RGBA8);
 
 	for (int m = 0; m < count; m++) {
-		const Ref<StandardMaterial3D> &material = p_materials[m];
-		const Color tint = material->get_albedo();
+		const Color tint = p_materials[m]->get_albedo();
 
 		Ref<Image> source;
-		const Ref<Texture2D> texture = material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
-		if (texture.is_valid()) {
-			source = texture->get_image();
+		if (p_materials[m]->get_texture(BaseMaterial3D::TEXTURE_ALBEDO).is_valid()) {
+			source = p_images[m];
 			if (source.is_null() || source->is_empty()) {
-				return Ref<StandardMaterial3D>();
+				return Ref<Image>();
 			}
 			source = source->duplicate();
 			if (source->is_compressed() && source->decompress() != OK) {
-				return Ref<StandardMaterial3D>();
+				return Ref<Image>();
 			}
 			source->convert(Image::FORMAT_RGBA8);
 			source->resize(inner, inner, Image::INTERPOLATE_BILINEAR);
@@ -129,9 +127,12 @@ Ref<StandardMaterial3D> HLODMaterialAtlas::build(const Vector<Ref<StandardMateri
 	}
 
 	atlas->generate_mipmaps();
+	return atlas;
+}
 
-	Ref<StandardMaterial3D> result = p_materials[0]->duplicate();
+Ref<StandardMaterial3D> HLODMaterialAtlas::create_material(const Ref<StandardMaterial3D> &p_template, const Ref<Image> &p_atlas) {
+	Ref<StandardMaterial3D> result = p_template->duplicate();
 	result->set_albedo(Color(1, 1, 1, 1));
-	result->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, ImageTexture::create_from_image(atlas));
+	result->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, ImageTexture::create_from_image(p_atlas));
 	return result;
 }

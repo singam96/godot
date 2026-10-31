@@ -30,11 +30,13 @@
 
 #pragma once
 
+#include "core/io/image.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/vector.h"
 
-class StandardMaterial3D;
+class Image;
 class Material;
+class StandardMaterial3D;
 
 // Helpers used by HLODCluster3D to bake several simple materials into one texture atlas.
 class HLODMaterialAtlas {
@@ -49,8 +51,12 @@ public:
 	// Materials with the same key can share an atlas, because the rest of their settings are identical.
 	static String get_group_key(const Ref<StandardMaterial3D> &p_material);
 
-	// Bakes the albedo of every material into a single atlas. `r_rects` receives, for each material, the rectangle
-	// (in 0..1 UV space) that the 0..1 UV range of that material must be remapped to. Returns a null reference if
-	// a texture could not be read, in which case the materials should be left untouched.
-	static Ref<StandardMaterial3D> build(const Vector<Ref<StandardMaterial3D>> &p_materials, int p_cell_size, Vector<Rect2> &r_rects);
+	// Bakes the albedo of every material into a single atlas image. `p_images` holds the albedo texture image of
+	// every material (null for materials without a texture). `r_rects` receives, for each material, the rectangle
+	// (in 0..1 UV space) that the 0..1 UV range of that material must be remapped to. This only does CPU work and
+	// is safe to call from a worker thread. Returns a null reference if the atlas can't be built.
+	static Ref<Image> build(const Vector<Ref<StandardMaterial3D>> &p_materials, const Vector<Ref<Image>> &p_images, int p_cell_size, Vector<Rect2> &r_rects);
+
+	// Creates the material that draws the atlas, based on the settings of `p_template`. Uses the rendering server.
+	static Ref<StandardMaterial3D> create_material(const Ref<StandardMaterial3D> &p_template, const Ref<Image> &p_atlas);
 };

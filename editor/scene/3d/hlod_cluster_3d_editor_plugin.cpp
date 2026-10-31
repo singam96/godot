@@ -31,6 +31,7 @@
 #include "hlod_cluster_3d_editor_plugin.h"
 
 #include "core/object/callable_mp.h"
+#include "core/os/os.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
 #include "editor/editor_undo_redo_manager.h"
@@ -41,7 +42,21 @@ void HLODCluster3DEditorPlugin::_generate() {
 	ERR_FAIL_NULL(cluster);
 
 	const Ref<Mesh> old_mesh = cluster->get_proxy_mesh();
-	const Error err = cluster->generate_proxy();
+
+	// The heavy work runs on a worker thread while a progress dialog keeps the editor responsive and lets the user cancel.
+	Error err = cluster->generate_proxy_async();
+	if (err == OK) {
+		EditorProgress progress("hlod_generate", TTR("Generating HLOD Proxy"), 1000, true);
+		while (cluster->is_generating()) {
+			if (progress.step(cluster->get_generation_status(), int(cluster->get_generation_progress() * 1000), true)) {
+				cluster->cancel_generation();
+				break;
+			}
+			OS::get_singleton()->delay_usec(10000);
+		}
+		err = cluster->finish_generation();
+	}
+
 	switch (err) {
 		case OK: {
 			EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
@@ -49,6 +64,9 @@ void HLODCluster3DEditorPlugin::_generate() {
 			ur->add_do_property(cluster, "proxy_mesh", cluster->get_proxy_mesh());
 			ur->add_undo_property(cluster, "proxy_mesh", old_mesh);
 			ur->commit_action(false); // The proxy was already assigned by generate_proxy().
+		} break;
+		case ERR_SKIP: {
+			// Cancelled by the user.
 		} break;
 		case ERR_DOES_NOT_EXIST: {
 			EditorNode::get_singleton()->show_warning(TTR("No meshes to merge.\nMake sure the HLODCluster3D has at least one visible MeshInstance3D descendant."));

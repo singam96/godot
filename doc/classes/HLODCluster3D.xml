@@ -11,6 +11,7 @@
 		[b]Note:[/b] Descendants that already have [member Node3D.visibility_parent] set are left untouched and are not hidden by the cluster.
 		[b]Hierarchy:[/b] [HLODCluster3D] nodes can be nested to build several levels of detail, for example a district made of several streets. The proxy of the outer cluster merges all meshes below it, including those inside nested clusters. When the camera is close enough to the outer cluster, the outer proxy is hidden and each nested cluster takes over with its own [member switch_distance]. Nested clusters should use a smaller [member switch_distance] than the cluster that contains them.
 		In the editor, selecting an [HLODCluster3D] adds a [b]Generate HLOD[/b] button to the toolbar of the 3D editor, which calls [method generate_proxy] and supports undo.
+		[b]MultiMesh:[/b] Every instance of a [MultiMeshInstance3D] is merged into the proxy as its own copy of the mesh, so instanced foliage is supported too. Per-instance colors and custom data are not used. A [MultiMesh] with thousands of instances makes the generation slower, so a lower [member simplify_ratio] is recommended.
 		[b]Material atlas:[/b] If [member merge_materials] is enabled, simple opaque [StandardMaterial3D]s are baked into a shared texture atlas so that objects with different materials can be drawn in a single draw call. Only the albedo color and albedo texture are baked. Materials that use other features (transparency, normal maps, emission, etc.), tiled UVs or other settings that differ (roughness, culling, shading mode, etc.) keep their own surface.
 		[b]Streaming:[/b] For very large scenes, the detailed geometry can be stored in a separate scene with [method store_detail_scene]. At run-time, the scene is then loaded in a background thread when the camera gets close and freed when it moves away, while the lightweight [member proxy_mesh] is always available. Streaming is disabled in the editor.
 		[b]Importing:[/b] The scene import options include an [b]HLOD[/b] section that turns the root node into an [HLODCluster3D] and generates the proxy during import.
@@ -27,17 +28,54 @@
 				[b]Note:[/b] This reorganizes the node tree and cannot be undone with the editor's undo history. It is intended to be called once from a tool script. Choose a [param cell_size] smaller than this cluster's [member switch_distance].
 			</description>
 		</method>
+		<method name="cancel_generation">
+			<return type="void" />
+			<description>
+				Asks a generation started with [method generate_proxy_async] to stop. Call [method finish_generation] afterwards, which then returns [constant ERR_SKIP]. If the generation already finished, the request has no effect and [method finish_generation] returns its result as usual.
+			</description>
+		</method>
 		<method name="clear_proxy">
 			<return type="void" />
 			<description>
 				Removes the [member proxy_mesh]. The descendants are then always drawn according to their own visibility settings.
 			</description>
 		</method>
+		<method name="finish_generation">
+			<return type="int" enum="Error" />
+			<description>
+				Waits until the generation started with [method generate_proxy_async] is done and assigns the result to [member proxy_mesh]. The meshes and textures are created in this call, because they need the rendering server. Returns [constant OK] on success, [constant ERR_SKIP] if the generation was cancelled, [constant ERR_DOES_NOT_EXIST] if there was nothing to merge (for example because all faces were hidden) and [constant ERR_UNCONFIGURED] if no generation was started.
+			</description>
+		</method>
 		<method name="generate_proxy">
 			<return type="int" enum="Error" />
 			<description>
-				Merges the visible [MeshInstance3D] descendants into a new [member proxy_mesh], simplifying it according to [member simplify_ratio] and [member simplify_error]. Returns [constant OK] on success.
+				Merges the visible [MeshInstance3D] and [MultiMeshInstance3D] descendants into a new [member proxy_mesh], simplifying it according to [member simplify_ratio] and [member simplify_error]. Returns [constant OK] on success.
 				Returns [constant ERR_DOES_NOT_EXIST] if there is no geometry to merge, and [constant ERR_UNAVAILABLE] if simplification is requested but the meshoptimizer module is not available. This also works when the cluster is not inside the scene tree.
+			</description>
+		</method>
+		<method name="generate_proxy_async">
+			<return type="int" enum="Error" />
+			<description>
+				Starts [method generate_proxy] on a worker thread and returns immediately. The scene is read before this method returns, so the cluster may be changed afterwards without affecting the result. Poll [method is_generating], show [method get_generation_progress] and [method get_generation_status], and finish with [method finish_generation]. The editor uses this to show a progress dialog that can be cancelled.
+				Returns [constant OK] if the generation was started, [constant ERR_BUSY] if one is already running, and the errors of [method generate_proxy] if it could not be started.
+			</description>
+		</method>
+		<method name="get_generation_progress" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns how far the generation started with [method generate_proxy_async] has come, from [code]0.0[/code] to [code]1.0[/code].
+			</description>
+		</method>
+		<method name="get_generation_status" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns a short, translated description of the step that the generation started with [method generate_proxy_async] is working on, or an empty string if there is none.
+			</description>
+		</method>
+		<method name="is_generating" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the worker thread started with [method generate_proxy_async] is still busy. Once it returns [code]false[/code], call [method finish_generation].
 			</description>
 		</method>
 		<method name="store_detail_scene">
@@ -78,6 +116,10 @@
 		</member>
 		<member name="proxy_mesh" type="Mesh" setter="set_proxy_mesh" getter="get_proxy_mesh">
 			The simplified mesh drawn at a distance. It is expressed in the local space of this node. Assign it manually or create it with [method generate_proxy].
+		</member>
+		<member name="remove_hidden_faces" type="bool" setter="set_remove_hidden_faces" getter="get_remove_hidden_faces" default="true">
+			If [code]true[/code], [method generate_proxy] drops the triangles that cannot be seen from outside, such as the walls inside of a building or objects enclosed by other objects. A triangle is kept if a ray from any of 28 directions reaches it first. Transparent surfaces are always kept and do not hide anything. Triangles with no area are dropped as well.
+			[b]Note:[/b] Geometry that is only visible from the inside of the cluster (such as the interior of a room) is removed, which is not a problem for a proxy that is only drawn from far away.
 		</member>
 		<member name="simplify_error" type="float" setter="set_simplify_error" getter="get_simplify_error" default="0.1">
 			The maximum error allowed during simplification, relative to the size of the merged geometry. Simplification stops early if reaching [member simplify_ratio] would exceed this error.
