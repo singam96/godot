@@ -225,13 +225,29 @@ func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -90, 0)
 	sun.light_energy = 0.4
-	sun.light_bake_mode = Light3D.BAKE_DYNAMIC
+	sun.light_bake_mode = Light3D.BAKE_STATIC
 	sun.shadow_enabled = true
-	sun.shadow_caster_mask = 2
 	sun.shadow_normal_bias = 0.01
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	sun.directional_shadow_max_distance = 20.0
 	fixture.add_child(sun)
+	var moving_shadows := DirectionalLight3D.new()
+	moving_shadows.rotation_degrees = sun.rotation_degrees
+	moving_shadows.light_energy = 0.0
+	moving_shadows.light_bake_mode = Light3D.BAKE_DYNAMIC
+	moving_shadows.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	moving_shadows.shadow_enabled = true
+	moving_shadows.shadow_caster_mask = 2
+	moving_shadows.shadow_normal_bias = 0.01
+	moving_shadows.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	moving_shadows.directional_shadow_max_distance = 20.0
+	fixture.add_child(moving_shadows)
+	var static_blocker := MeshInstance3D.new()
+	var blocker_mesh := BoxMesh.new()
+	blocker_mesh.size = Vector3(0.5, 1.0, 0.5)
+	static_blocker.mesh = blocker_mesh
+	static_blocker.position = Vector3(0.7, 0.5, -2)
+	fixture.add_child(static_blocker)
 	var a := Image.create(8, 8, false, Image.FORMAT_RGBAH)
 	a.fill(Color(0.3, 0.05, 0.1, 0.8))
 	var b := Image.create(8, 8, false, Image.FORMAT_RGBAH)
@@ -246,7 +262,7 @@ func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
 	sun.visible = false
 	var reference := await _image()
 	var actor_unlit := _sample(reference, Vector3(0, 2, 0))
-	owner_data.call("set_baked_sun_shadow_layers", sun, 1, 2)
+	owner_data.call("set_baked_sun_shadow_layers", moving_shadows, 1, 2)
 	sun.visible = true
 	actor.visible = false
 	var unshadowed := await _image()
@@ -255,12 +271,26 @@ func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
 	var shadowed := await _image()
 	check(_difference(_sample(shadowed, shadow_point), Color(0.2, 0.2, 0.2)) < 0.03, "moving actor shadows both weighted sun samples while preserving ambient")
 	check(_value(_sample(shadowed, Vector3(0, 2, 0))) > _value(actor_unlit) + 0.04, "sampled sun retains live direct illumination on dynamic actors")
+	var static_shadow_point := Vector3(1.7, 0, -2)
+	check(_difference(_sample(shadowed, static_shadow_point), _sample(reference, static_shadow_point)) < 0.03, "zero-energy moving-shadow sun excludes current-direction static shadows from interpolated lightmaps")
+	var actor_blocker := MeshInstance3D.new()
+	var actor_blocker_mesh := BoxMesh.new()
+	actor_blocker_mesh.size = Vector3(0.8, 2, 0.8)
+	actor_blocker.mesh = actor_blocker_mesh
+	actor_blocker.position = Vector3(-1.3, 3.3, 0)
+	fixture.add_child(actor_blocker)
+	var statically_shadowed_actor := await _image()
+	check(_value(_sample(statically_shadowed_actor, Vector3(0, 2, 0))) < _value(_sample(shadowed, Vector3(0, 2, 0))) - 0.04, "main sun retains static-caster shadows on dynamic actors")
+	actor_blocker.queue_free()
+	await process_frame
 	owner_data.call("set_baked_sun_shadow_layers", null, -1, -1)
-	other_data.call("set_baked_sun_shadow_layers", sun, 1, 2)
+	other_data.call("set_baked_sun_shadow_layers", moving_shadows, 1, 2)
 	var isolated := await _image()
-	check(_difference(_sample(isolated, shadow_point), _sample(standard, shadow_point)) < 0.03, "sun layer associations remain isolated to their owner and disabling restores live sunlight")
+	check(_difference(_sample(isolated, shadow_point), _sample(standard, shadow_point)) < 0.03, "moving sun layer associations remain isolated to their owner and disabling restores the baked base")
 	other_data.call("set_baked_sun_shadow_layers", null, -1, -1)
 	sun.queue_free()
+	moving_shadows.queue_free()
+	static_blocker.queue_free()
 	await process_frame
 
 
