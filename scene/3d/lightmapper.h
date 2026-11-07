@@ -168,7 +168,16 @@ public:
 		Variant userdata;
 	};
 
+	struct OccluderData {
+		Vector<Vector3> points;
+		Vector<Vector2> uv;
+		Ref<Image> alpha;
+		uint32_t cull_mode = 0;
+		bool repeat_uv = true;
+	};
+
 	virtual void add_mesh(const MeshData &p_mesh) = 0;
+	virtual bool add_occluder(const OccluderData &p_occluder) { return false; }
 	virtual void add_directional_light(const String &p_name, bool p_static, const Vector3 &p_direction, const Color &p_color, float p_energy, float p_indirect_energy, float p_angular_distance, float p_shadow_blur) = 0;
 	virtual void add_omni_light(const String &p_name, bool p_static, const Vector3 &p_position, const Color &p_color, float p_energy, float p_indirect_energy, float p_range, float p_attenuation, float p_size, float p_shadow_blur) = 0;
 	virtual void add_spot_light(const String &p_name, bool p_static, const Vector3 &p_position, const Vector3 &p_direction, const Color &p_color, float p_energy, float p_indirect_energy, float p_range, float p_attenuation, float p_spot_angle, float p_spot_attenuation, float p_size, float p_shadow_blur) = 0;

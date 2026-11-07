@@ -37,6 +37,7 @@
 
 class CameraAttributes;
 class Light3D;
+class Material;
 class Mesh;
 class Sky;
 
@@ -212,6 +213,17 @@ private:
 	bool use_texture_for_bounces = true;
 	bool save_native_textures = false;
 	bool direct_visibility_output = false;
+	Node3D *bake_context_root = nullptr;
+	struct BakeOccluderMaterial {
+		Ref<Image> alpha;
+		Vector2 uv_scale = Vector2(1, 1);
+		Vector2 uv_offset;
+		uint32_t cull_mode = 0;
+		bool repeat_uv = true;
+		bool skip = false;
+	};
+	BakeError _prepare_bake_occluder_material(const Ref<Material> &p_material, BakeOccluderMaterial &r_material);
+	BakeError _collect_bake_occluders(Node *p_node, const Ref<Lightmapper> &p_lightmapper, HashMap<ObjectID, BakeOccluderMaterial> &r_materials);
 	LightmapGIData::ShadowmaskMode shadowmask_mode = LightmapGIData::SHADOWMASK_MODE_NONE;
 	GenerateProbes gen_probes = GENERATE_PROBES_SUBDIV_8;
 	Ref<CameraAttributes> camera_attributes;
@@ -363,7 +375,7 @@ public:
 	AABB get_aabb() const override;
 
 	BakeError bake(Node *p_from_node, String p_image_data_path = "", Lightmapper::BakeStepFunc p_bake_step = nullptr, void *p_bake_userdata = nullptr);
-	BakeError bake_lightmaps(Node *p_from_node, const String &p_image_data_path, bool p_save_native_textures = false, bool p_direct_visibility = false);
+	BakeError bake_lightmaps(Node *p_from_node, const String &p_image_data_path, bool p_save_native_textures = false, bool p_direct_visibility = false, Node3D *p_context_root = nullptr);
 
 	virtual PackedStringArray get_configuration_warnings() const override;
 

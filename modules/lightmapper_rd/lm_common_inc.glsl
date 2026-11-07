@@ -44,7 +44,7 @@ struct Triangle {
 	vec3 min_bounds;
 	uint cull_mode;
 	vec3 max_bounds;
-	uint pad1;
+	uint context_tag;
 };
 
 struct ClusterAABB {
@@ -131,6 +131,8 @@ layout(set = 0, binding = 13, std430) restrict readonly buffer ClusterAABBs {
 	ClusterAABB data[];
 }
 cluster_aabbs;
+
+layout(set = 0, binding = 14) uniform texture2DArray occluder_alpha_tex;
 
 // Fragment action constants
 const uint FA_NONE = 0;

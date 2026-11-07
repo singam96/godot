@@ -42,9 +42,11 @@
 #include "scene/3d/light_3d.h"
 #include "scene/3d/lightmap_probe.h"
 #include "scene/3d/mesh_instance_3d.h"
+#include "scene/3d/multimesh_instance_3d.h"
 #include "scene/resources/camera_attributes.h"
 #include "scene/resources/environment.h"
 #include "scene/resources/image_texture.h"
+#include "scene/resources/material.h"
 #include "scene/resources/sky.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -1088,15 +1090,146 @@ void LightmapGI::_build_area_light_texture_atlas(const Vector<LightmapGI::Lights
 	}
 }
 
-LightmapGI::BakeError LightmapGI::bake_lightmaps(Node *p_from_node, const String &p_image_data_path, bool p_save_native_textures, bool p_direct_visibility) {
+LightmapGI::BakeError LightmapGI::_prepare_bake_occluder_material(const Ref<Material> &p_material, BakeOccluderMaterial &r_material) {
+	if (p_material.is_null()) {
+		return BAKE_ERROR_OK;
+	}
+	Ref<BaseMaterial3D> material = p_material;
+	ERR_FAIL_COND_V_MSG(material.is_null(), BAKE_ERROR_INVALID_CONFIGURATION, "Bake context requires BaseMaterial3D overrides. Convert custom shader alpha cutouts to an equivalent StandardMaterial3D for the offline context.");
+	ERR_FAIL_COND_V_MSG(material->get_transparency() != BaseMaterial3D::TRANSPARENCY_DISABLED && material->get_transparency() != BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR, BAKE_ERROR_INVALID_CONFIGURATION, "Bake context supports opaque and alpha-scissor materials only.");
+	switch (material->get_cull_mode()) {
+		case BaseMaterial3D::CULL_BACK:
+			r_material.cull_mode = RSE::CULL_MODE_BACK;
+			break;
+		case BaseMaterial3D::CULL_FRONT:
+			r_material.cull_mode = RSE::CULL_MODE_FRONT;
+			break;
+		case BaseMaterial3D::CULL_DISABLED:
+			r_material.cull_mode = RSE::CULL_MODE_DISABLED;
+			break;
+	}
+	if (material->get_transparency() == BaseMaterial3D::TRANSPARENCY_DISABLED) {
+		return BAKE_ERROR_OK;
+	}
+	ERR_FAIL_COND_V_MSG(material->get_flag(BaseMaterial3D::FLAG_UV1_USE_TRIPLANAR), BAKE_ERROR_INVALID_CONFIGURATION, "Alpha-scissor bake context requires ordinary UV1 mapping.");
+	r_material.uv_scale = Vector2(material->get_uv1_scale().x, material->get_uv1_scale().y);
+	r_material.uv_offset = Vector2(material->get_uv1_offset().x, material->get_uv1_offset().y);
+	r_material.repeat_uv = material->get_flag(BaseMaterial3D::FLAG_USE_TEXTURE_REPEAT);
+	const float alpha = material->get_albedo().a;
+	const float cutoff = material->get_alpha_scissor_threshold();
+	Ref<Texture2D> texture = material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+	if (texture.is_null()) {
+		r_material.skip = alpha < cutoff;
+		return BAKE_ERROR_OK;
+	}
+	Ref<Image> source = texture->get_image();
+	ERR_FAIL_COND_V_MSG(source.is_null() || source->is_empty(), BAKE_ERROR_INVALID_CONFIGURATION, "Cannot read the bake context's alpha texture.");
+	source = source->duplicate();
+	ERR_FAIL_COND_V_MSG(source->is_compressed() && source->decompress() != OK, BAKE_ERROR_INVALID_CONFIGURATION, "Cannot decompress the bake context's alpha texture.");
+	Vector<uint8_t> pixels;
+	pixels.resize(128 * 128);
+	bool any_opaque = false;
+	bool any_transparent = false;
+	for (int y = 0; y < 128; y++) {
+		for (int x = 0; x < 128; x++) {
+			const int sx = MIN(int((x + 0.5) * source->get_width() / 128.0), source->get_width() - 1);
+			const int sy = MIN(int((y + 0.5) * source->get_height() / 128.0), source->get_height() - 1);
+			const bool opaque = source->get_pixel(sx, sy).a * alpha >= cutoff;
+			pixels.write[y * 128 + x] = opaque ? 255 : 0;
+			any_opaque |= opaque;
+			any_transparent |= !opaque;
+		}
+	}
+	r_material.skip = !any_opaque;
+	if (any_opaque && any_transparent) {
+		r_material.alpha = Image::create_from_data(128, 128, false, Image::FORMAT_R8, pixels);
+	}
+	return BAKE_ERROR_OK;
+}
+
+LightmapGI::BakeError LightmapGI::_collect_bake_occluders(Node *p_node, const Ref<Lightmapper> &p_lightmapper, HashMap<ObjectID, BakeOccluderMaterial> &r_materials) {
+	const Transform3D to_lightmap = get_global_transform().affine_inverse();
+	auto add_mesh = [&](const Ref<Mesh> &p_mesh, const Transform3D &p_transform, MeshInstance3D *p_instance, const Ref<Material> &p_override) -> BakeError {
+		if (p_mesh.is_null()) {
+			return BAKE_ERROR_OK;
+		}
+		for (int surface = 0; surface < p_mesh->get_surface_count(); surface++) {
+			if (p_mesh->surface_get_primitive_type(surface) != Mesh::PRIMITIVE_TRIANGLES) {
+				continue;
+			}
+			Ref<Material> material = p_instance ? p_instance->get_active_material(surface) : (p_override.is_valid() ? p_override : p_mesh->surface_get_material(surface));
+			const ObjectID material_id = material.is_valid() ? material->get_instance_id() : ObjectID();
+			if (!r_materials.has(material_id)) {
+				BakeOccluderMaterial prepared;
+				BakeError error = _prepare_bake_occluder_material(material, prepared);
+				ERR_FAIL_COND_V(error != BAKE_ERROR_OK, error);
+				r_materials[material_id] = prepared;
+			}
+			const BakeOccluderMaterial &prepared = r_materials[material_id];
+			if (prepared.skip) {
+				continue;
+			}
+			Array arrays = p_mesh->surface_get_arrays(surface);
+			Vector<Vector3> vertices = arrays[Mesh::ARRAY_VERTEX];
+			Vector<Vector2> uv = arrays[Mesh::ARRAY_TEX_UV];
+			Vector<int> indices = arrays[Mesh::ARRAY_INDEX];
+			ERR_FAIL_COND_V_MSG(prepared.alpha.is_valid() && uv.size() != vertices.size(), BAKE_ERROR_INVALID_CONFIGURATION, "Alpha-scissor context meshes require UV1.");
+			const int count = indices.is_empty() ? vertices.size() : indices.size();
+			ERR_FAIL_COND_V(count % 3 != 0, BAKE_ERROR_INVALID_CONFIGURATION);
+			Lightmapper::OccluderData occluder;
+			occluder.alpha = prepared.alpha;
+			occluder.repeat_uv = prepared.repeat_uv;
+			occluder.cull_mode = prepared.cull_mode;
+			for (int i = 0; i < count; i++) {
+				const int index = indices.is_empty() ? i : indices[i];
+				ERR_FAIL_INDEX_V(index, vertices.size(), BAKE_ERROR_INVALID_CONFIGURATION);
+				const Vector3 position = p_transform.xform(vertices[index]);
+				ERR_FAIL_COND_V(!position.is_finite(), BAKE_ERROR_INVALID_CONFIGURATION);
+				occluder.points.push_back(position);
+				occluder.uv.push_back(prepared.alpha.is_valid() ? uv[index] * prepared.uv_scale + prepared.uv_offset : Vector2());
+			}
+			if (!occluder.points.is_empty()) {
+				ERR_FAIL_COND_V_MSG(!p_lightmapper->add_occluder(occluder), BAKE_ERROR_NO_LIGHTMAPPER, "The active lightmapper cannot accept acceleration-only context geometry.");
+			}
+		}
+		return BAKE_ERROR_OK;
+	};
+	if (MeshInstance3D *mesh = Object::cast_to<MeshInstance3D>(p_node)) {
+		const BakeError error = add_mesh(mesh->get_mesh(), to_lightmap * mesh->get_global_transform(), mesh, Ref<Material>());
+		ERR_FAIL_COND_V(error != BAKE_ERROR_OK, error);
+	} else if (MultiMeshInstance3D *multi = Object::cast_to<MultiMeshInstance3D>(p_node)) {
+		Ref<MultiMesh> instances = multi->get_multimesh();
+		if (instances.is_valid()) {
+			ERR_FAIL_COND_V_MSG(instances->get_transform_format() != MultiMesh::TRANSFORM_3D, BAKE_ERROR_INVALID_CONFIGURATION, "Bake context MultiMeshes require 3D transforms.");
+			const Transform3D transform = to_lightmap * multi->get_global_transform();
+			for (int i = 0; i < instances->get_instance_count(); i++) {
+				const BakeError error = add_mesh(instances->get_mesh(), transform * instances->get_instance_transform(i), nullptr, multi->get_material_override());
+				ERR_FAIL_COND_V(error != BAKE_ERROR_OK, error);
+			}
+		}
+	}
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		const BakeError error = _collect_bake_occluders(p_node->get_child(i), p_lightmapper, r_materials);
+		ERR_FAIL_COND_V(error != BAKE_ERROR_OK, error);
+	}
+	return BAKE_ERROR_OK;
+}
+
+LightmapGI::BakeError LightmapGI::bake_lightmaps(Node *p_from_node, const String &p_image_data_path, bool p_save_native_textures, bool p_direct_visibility, Node3D *p_context_root) {
 	ERR_FAIL_COND_V_MSG(p_direct_visibility && (!p_save_native_textures || bounces != 0 || directional || use_denoiser || environment_mode != ENVIRONMENT_MODE_DISABLED || shadowmask_mode != LightmapGIData::SHADOWMASK_MODE_NONE), BAKE_ERROR_INVALID_CONFIGURATION, "Direct visibility output requires native textures, zero bounces, no directional packing, environment, denoiser or shadowmask.");
+	Node *receiver_root = p_from_node ? p_from_node : get_parent();
+	ERR_FAIL_COND_V_MSG(p_context_root && !p_context_root->is_inside_tree(), BAKE_ERROR_INVALID_CONFIGURATION, "Bake context must be inside the scene tree so its global transforms are available.");
+	ERR_FAIL_COND_V_MSG(p_context_root && (!receiver_root || p_context_root == receiver_root || p_context_root->is_ancestor_of(receiver_root) || receiver_root->is_ancestor_of(p_context_root)), BAKE_ERROR_INVALID_CONFIGURATION, "Bake context must be a separate hierarchy from the receiver root.");
 	const bool previous = save_native_textures;
 	const bool previous_direct = direct_visibility_output;
+	Node3D *previous_context = bake_context_root;
 	save_native_textures = p_save_native_textures;
 	direct_visibility_output = p_direct_visibility;
+	bake_context_root = p_context_root;
 	const BakeError result = bake(p_from_node, p_image_data_path);
 	save_native_textures = previous;
 	direct_visibility_output = previous_direct;
+	bake_context_root = previous_context;
 	return result;
 }
 
@@ -1115,6 +1248,11 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 	Ref<Lightmapper> lightmapper = Lightmapper::create();
 	ERR_FAIL_COND_V(lightmapper.is_null(), BAKE_ERROR_NO_LIGHTMAPPER);
 	ERR_FAIL_COND_V_MSG(!lightmapper->set_direct_visibility_output(direct_visibility_output), BAKE_ERROR_NO_LIGHTMAPPER, "The active lightmapper does not support direct visibility output.");
+	if (bake_context_root) {
+		HashMap<ObjectID, BakeOccluderMaterial> materials;
+		const BakeError error = _collect_bake_occluders(bake_context_root, lightmapper, materials);
+		ERR_FAIL_COND_V(error != BAKE_ERROR_OK, error);
+	}
 
 	BakeStepUD bsud;
 	bsud.func = p_bake_step;
@@ -2125,7 +2263,7 @@ void LightmapGI::_validate_property(PropertyInfo &p_property) const {
 
 void LightmapGI::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_data", "data"), &LightmapGI::set_light_data);
-	ClassDB::bind_method(D_METHOD("bake_lightmaps", "from_node", "image_data_path", "save_native_textures", "direct_visibility"), &LightmapGI::bake_lightmaps, DEFVAL(false), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("bake_lightmaps", "from_node", "image_data_path", "save_native_textures", "direct_visibility", "context_root"), &LightmapGI::bake_lightmaps, DEFVAL(false), DEFVAL(false), DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("get_light_data"), &LightmapGI::get_light_data);
 
 	ClassDB::bind_method(D_METHOD("set_bake_quality", "bake_quality"), &LightmapGI::set_bake_quality);

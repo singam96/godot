@@ -68,6 +68,18 @@ void LightmapperRD::add_mesh(const MeshData &p_mesh) {
 	mesh_instances.push_back(mi);
 }
 
+bool LightmapperRD::add_occluder(const OccluderData &p_occluder) {
+	ERR_FAIL_COND_V(p_occluder.points.is_empty() || p_occluder.points.size() % 3 != 0 || p_occluder.uv.size() != p_occluder.points.size(), false);
+	if (p_occluder.alpha.is_valid()) {
+		ERR_FAIL_COND_V(p_occluder.alpha->get_format() != Image::FORMAT_R8 || p_occluder.alpha->get_width() != 128 || p_occluder.alpha->get_height() != 128, false);
+		if (!occluder_alpha_images.has(p_occluder.alpha)) {
+			occluder_alpha_images.push_back(p_occluder.alpha);
+		}
+	}
+	occluders.push_back(p_occluder);
+	return true;
+}
+
 void LightmapperRD::add_directional_light(const String &p_name, bool p_static, const Vector3 &p_direction, const Color &p_color, float p_energy, float p_indirect_energy, float p_angular_distance, float p_shadow_blur) {
 	Light l;
 	l.type = LIGHT_TYPE_DIRECTIONAL;
@@ -561,9 +573,44 @@ void LightmapperRD::_create_acceleration_structures(RenderingDevice *rd, Size2i 
 			if (material.is_valid()) {
 				t.cull_mode = RSG::material_storage->material_get_cull_mode(material);
 			}
-			t.pad1 = 0; //make valgrind not complain
+			t.context_tag = 0;
 			triangles.push_back(t);
 			slice_triangle_count.write[t.slice]++;
+		}
+	}
+
+	// Context participates only in ray traversal. Keep its triangles after every
+	// atlas slice, without allocating receiver texels, seams or probe positions.
+	for (const OccluderData &occluder : occluders) {
+		const uint32_t tag = occluder.alpha.is_valid() ? uint32_t(occluder_alpha_images.find(occluder.alpha) + 2) | (occluder.repeat_uv ? 0u : 0x80000000u) : 1u;
+		for (int i = 0; i < occluder.points.size(); i += 3) {
+			Triangle triangle;
+			triangle.slice = UINT32_MAX;
+			triangle.context_tag = tag;
+			triangle.cull_mode = occluder.cull_mode;
+			AABB triangle_bounds(occluder.points[i], Vector3());
+			for (int k = 0; k < 3; k++) {
+				const Vector3 &point = occluder.points[i + k];
+				bounds.expand_to(point);
+				triangle_bounds.expand_to(point);
+				Vertex vertex;
+				vertex.position[0] = point.x;
+				vertex.position[1] = point.y;
+				vertex.position[2] = point.z;
+				vertex.uv[0] = occluder.uv[i + k].x;
+				vertex.uv[1] = occluder.uv[i + k].y;
+				// Context normals and material color are never used for scattering.
+				vertex.normal_xy[0] = 0;
+				vertex.normal_xy[1] = 0;
+				vertex.normal_z = 0;
+				triangle.indices[k] = vertex_array.size();
+				vertex_array.push_back(vertex);
+			}
+			for (int axis = 0; axis < 3; axis++) {
+				triangle.min_bounds[axis] = triangle_bounds.position[axis];
+				triangle.max_bounds[axis] = triangle_bounds.position[axis] + MAX(triangle_bounds.size[axis], 0.0001);
+			}
+			triangles.push_back(triangle);
 		}
 	}
 
@@ -1218,6 +1265,7 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 
 	RID albedo_array_tex;
 	RID emission_array_tex;
+	RID occluder_alpha_tex;
 	RID normal_tex;
 	RID position_tex;
 	RID unocclude_tex;
@@ -1233,6 +1281,7 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 #define FREE_TEXTURES \
 	rd->free_rid(albedo_array_tex); \
 	rd->free_rid(emission_array_tex); \
+	rd->free_rid(occluder_alpha_tex); \
 	rd->free_rid(normal_tex); \
 	rd->free_rid(position_tex); \
 	rd->free_rid(unocclude_tex); \
@@ -1247,6 +1296,26 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 	}
 
 	{ // create all textures
+		{
+			RD::TextureFormat context_format;
+			context_format.width = 128;
+			context_format.height = 128;
+			context_format.array_layers = MAX(1, occluder_alpha_images.size());
+			context_format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
+			context_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT;
+			context_format.format = RD::DATA_FORMAT_R8_UNORM;
+			Vector<Vector<uint8_t>> context_data;
+			for (const Ref<Image> &image : occluder_alpha_images) {
+				context_data.push_back(image->get_data());
+			}
+			if (context_data.is_empty()) {
+				Vector<uint8_t> opaque;
+				opaque.resize(128 * 128);
+				opaque.fill(255);
+				context_data.push_back(opaque);
+			}
+			occluder_alpha_tex = rd->texture_create(context_format, RD::TextureView(), context_data);
+		}
 
 		Vector<Vector<uint8_t>> albedo_data;
 		Vector<Vector<uint8_t>> emission_data;
@@ -1589,6 +1658,13 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
 			u.binding = 13;
 			u.append_id(cluster_aabbs_buffer);
+			base_uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+			u.binding = 14;
+			u.append_id(occluder_alpha_tex);
 			base_uniforms.push_back(u);
 		}
 	}

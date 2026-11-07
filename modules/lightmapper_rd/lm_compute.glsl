@@ -146,6 +146,18 @@ bool ray_box_test(vec3 p_from, vec3 p_inv_dir, vec3 p_box_min, vec3 p_box_max) {
 #define CLUSTER_TRIANGLE_ITERATION
 #endif
 
+bool context_triangle_is_opaque(Triangle triangle, vec3 barycentric) {
+	uint mask = triangle.context_tag & 0x7fffffffu;
+	if (mask < 2u) {
+		return true;
+	}
+	vec2 uv = barycentric.x * vertices.data[triangle.indices.x].uv + barycentric.y * vertices.data[triangle.indices.y].uv + barycentric.z * vertices.data[triangle.indices.z].uv;
+	uv = (triangle.context_tag & 0x80000000u) == 0u ? fract(uv) : clamp(uv, vec2(0.0), vec2(1.0));
+	ivec2 size = textureSize(occluder_alpha_tex, 0).xy;
+	ivec2 pixel = clamp(ivec2(floor(uv * vec2(size))), ivec2(0), size - 1);
+	return texelFetch(occluder_alpha_tex, ivec3(pixel, int(mask - 2u)), 0).r > 0.5;
+}
+
 uint trace_ray(vec3 p_from, vec3 p_to, bool p_any_hit, out float r_distance, out vec3 r_normal, out uint r_triangle, out vec3 r_barycentric) {
 	// World coordinates.
 	vec3 rel = p_to - p_from;
@@ -232,6 +244,9 @@ uint trace_ray(vec3 p_from, vec3 p_to, bool p_any_hit, out float r_distance, out
 							float distance;
 							vec3 barycentric;
 							if (ray_hits_triangle(p_from, dir, rel_len, vtx0, vtx1, vtx2, distance, barycentric)) {
+								if (!context_triangle_is_opaque(triangle, barycentric)) {
+									continue;
+								}
 								if (p_any_hit) {
 									// Return early if any hit was requested.
 									return RAY_ANY;
@@ -328,7 +343,7 @@ uint trace_ray_closest_hit_triangle_albedo_alpha(vec3 p_from, vec3 p_to, out vec
 
 		vec3 uvw = vec3(barycentric.x * vert0.uv + barycentric.y * vert1.uv + barycentric.z * vert2.uv, float(triangles.data[tidx].slice));
 
-		albedo_alpha = textureLod(sampler2DArray(albedo_tex, linear_sampler), uvw, 0);
+		albedo_alpha = triangles.data[tidx].context_tag != 0u ? vec4(0.0, 0.0, 0.0, 1.0) : textureLod(sampler2DArray(albedo_tex, linear_sampler), uvw, 0);
 		hit_position = barycentric.x * vert0.position + barycentric.y * vert1.position + barycentric.z * vert2.position;
 	}
 
@@ -731,6 +746,10 @@ vec3 trace_indirect_light(vec3 p_position, vec3 p_ray_dir, inout uint r_noise, f
 		uint tidx;
 		vec3 barycentric;
 		uint trace_result = trace_ray_closest_hit_triangle(position + ray_dir * bake_params.bias, position + ray_dir * length(bake_params.world_size), tidx, barycentric);
+		if (trace_result != RAY_MISS && triangles.data[tidx].context_tag != 0u) {
+			// Context blocks rays but never scatters light or reads a receiver atlas.
+			break;
+		}
 		if (trace_result == RAY_FRONT) {
 			Vertex vert0 = vertices.data[triangles.data[tidx].indices.x];
 			Vertex vert1 = vertices.data[triangles.data[tidx].indices.y];

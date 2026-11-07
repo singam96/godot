@@ -200,7 +200,7 @@ class LightmapperRD : public Lightmapper {
 		float min_bounds[3] = {};
 		uint32_t cull_mode = 0;
 		float max_bounds[3] = {};
-		float pad1 = 0.0;
+		uint32_t context_tag = 0;
 		bool operator<(const Triangle &p_triangle) const {
 			return slice < p_triangle.slice;
 		}
@@ -214,6 +214,8 @@ class LightmapperRD : public Lightmapper {
 	};
 
 	Vector<MeshInstance> mesh_instances;
+	Vector<OccluderData> occluders;
+	Vector<Ref<Image>> occluder_alpha_images;
 
 	Vector<Light> lights;
 	Vector<LightMetadata> light_metadata;
@@ -313,6 +315,7 @@ public:
 		return true;
 	}
 	virtual void add_mesh(const MeshData &p_mesh) override;
+	virtual bool add_occluder(const OccluderData &p_occluder) override;
 	virtual void add_directional_light(const String &p_name, bool p_static, const Vector3 &p_direction, const Color &p_color, float p_energy, float p_indirect_energy, float p_angular_distance, float p_shadow_blur) override;
 	virtual void add_omni_light(const String &p_name, bool p_static, const Vector3 &p_position, const Color &p_color, float p_energy, float p_indirect_energy, float p_range, float p_attenuation, float p_size, float p_shadow_blur) override;
 	virtual void add_spot_light(const String &p_name, bool p_static, const Vector3 &p_position, const Vector3 &p_direction, const Color &p_color, float p_energy, float p_indirect_energy, float p_range, float p_attenuation, float p_spot_angle, float p_spot_attenuation, float p_size, float p_shadow_blur) override;
