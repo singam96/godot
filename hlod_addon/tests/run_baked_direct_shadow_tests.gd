@@ -40,6 +40,10 @@ func _value(color: Color) -> float:
 	return (color.r + color.g + color.b) / 3.0
 
 
+func _difference(a: Color, b: Color) -> float:
+	return maxf(absf(a.r - b.r), maxf(absf(a.g - b.g), absf(a.b - b.b)))
+
+
 func _plane(size: Vector2) -> ArrayMesh:
 	var primitive := PlaneMesh.new()
 	primitive.size = size
@@ -168,11 +172,44 @@ func _run() -> void:
 	lamp.call("set_baked_shadow_lightmap", null, -1)
 	var disabled := await _image()
 	check(absf(_value(_sample(disabled, shadow_point)) - clear_value) < 0.03, "disabling restores standard STATIC behavior")
+	await _spatial_filtering(texture, shadow_point, clear_point)
 	await _native_bake_and_stationary_probes()
 	fixture.queue_free()
 	await process_frame
 	print("BAKED_DIRECT_SHADOW_TESTS checks=%d failures=%d" % [checks, failures])
 	quit(0 if failures == 0 else 1)
+
+
+func _spatial_filtering(texture: Texture2DArray, shadow_point: Vector3, clear_point: Vector3) -> void:
+	lamp.call("set_baked_shadow_lightmap", owner_data, 1)
+	var ambient := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	ambient.fill(Color(0.2, 0.2, 0.2, 1.0))
+	var empty := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	empty.fill(Color(0, 0, 0, 0))
+	var direct := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	var composed := ambient.duplicate()
+	for y in 8:
+		for x in 8:
+			var value := Color(0.9, 0.1, 0.3, 0.95) if (x + y) % 2 == 0 else Color(0.1, 0.8, 0.6, 0.05)
+			direct.set_pixel(x, y, value)
+			composed.set_pixel(x, y, Color(0.2 + value.r * value.a, 0.2 + value.g * value.a, 0.2 + value.b * value.a, 1.0))
+	for bicubic in [true, false]:
+		RenderingServer.lightmaps_set_bicubic_filter(bicubic)
+		texture.update_layer(ambient, 0)
+		texture.update_layer(empty, 1)
+		var reference := await _image()
+		texture.update_layer(composed, 0)
+		texture.update_layer(direct, 1)
+		var shadowed := await _image()
+		var mode := "bicubic" if bicubic else "linear"
+		check(_difference(_sample(shadowed, clear_point), _sample(reference, clear_point)) > 0.05, "%s spatial fixture displays composed lamp RGB times visibility" % mode)
+		var largest_error := 0.0
+		for offset: Vector3 in [Vector3(-0.3, 0, -0.15), Vector3(-0.1, 0, 0.15), Vector3.ZERO, Vector3(0.1, 0, -0.15), Vector3(0.3, 0, 0.15)]:
+			var point := shadow_point + offset
+			largest_error = maxf(largest_error, _difference(_sample(shadowed, point), _sample(reference, point)))
+		check(largest_error < 0.025, "%s filtering removes spatially varying RGB and visibility without residuals (error %.4f)" % [mode, largest_error])
+	RenderingServer.lightmaps_set_bicubic_filter(true)
+	lamp.call("set_baked_shadow_lightmap", null, -1)
 
 
 func _native_bake_and_stationary_probes() -> void:

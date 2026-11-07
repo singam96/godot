@@ -943,6 +943,36 @@ layout(location = 10) in flat uint instance_index_interp;
 
 #ifdef USE_LIGHTMAP
 #include "../bicubic_filter_inc.glsl"
+
+vec3 lightmap_baked_direct_shadow_loss(texture2DArray tex, vec3 uvw, vec2 texture_size, float visibility) {
+	// The composed atlas filters RGB * A. Filtering RGB and A separately and
+	// multiplying them would leave colored residuals across visibility edges.
+	vec2 texel = uvw.xy * texture_size - vec2(0.5);
+	ivec2 origin = ivec2(floor(texel));
+	vec2 fraction = fract(texel);
+	vec4 weight_x = vec4(1.0 - fraction.x, fraction.x, 0.0, 0.0);
+	vec4 weight_y = vec4(1.0 - fraction.y, fraction.y, 0.0, 0.0);
+	int taps = 2;
+	if (sc_use_lightmap_bicubic_filter()) {
+		weight_x = vec4(w0(fraction.x), w1(fraction.x), w2(fraction.x), w3(fraction.x));
+		weight_y = vec4(w0(fraction.y), w1(fraction.y), w2(fraction.y), w3(fraction.y));
+		origin -= ivec2(1);
+		taps = 4;
+	}
+	vec3 unoccluded = vec3(0.0);
+	vec3 baked = vec3(0.0);
+	ivec2 last_texel = ivec2(texture_size) - ivec2(1);
+	for (int y = 0; y < taps; y++) {
+		for (int x = 0; x < taps; x++) {
+			ivec2 at = clamp(origin + ivec2(x, y), ivec2(0), last_texel);
+			vec4 direct = texelFetch(sampler2DArray(tex, SAMPLER_LINEAR_CLAMP), ivec3(at, int(uvw.z)), 0);
+			float weight = weight_x[x] * weight_y[y];
+			unoccluded += direct.rgb * weight;
+			baked += direct.rgb * clamp(direct.a, 0.0, 1.0) * weight;
+		}
+	}
+	return max(baked - unoccluded * visibility, vec3(0.0));
+}
 #endif //USE_LIGHTMAP
 
 #ifdef USE_MULTIVIEW
@@ -2238,8 +2268,7 @@ void fragment_shader(in SceneData scene_data) {
 				half visibility = light_get_omni_shadow(index, vertex, normal, scene_data.taa_frame_count, attenuation);
 				vec3 uvw = vec3(lightmap_uv, float(lightmap_slice) + omni_lights.data[index].baked_shadow_layer_offset);
 				if (visibility < half(1.0) && int(uvw.z) < textureSize(sampler2DArray(lightmap_textures[lightmap_index], SAMPLER_LINEAR_CLAMP), 0).z) {
-					vec4 direct_light = textureLod(sampler2DArray(lightmap_textures[lightmap_index], SAMPLER_LINEAR_CLAMP), uvw, 0.0);
-					baked_shadow_loss += direct_light.rgb * lightmaps.data[lightmap_index].exposure_normalization * max(clamp(direct_light.a, 0.0, 1.0) - float(visibility), 0.0);
+					baked_shadow_loss += lightmap_baked_direct_shadow_loss(lightmap_textures[lightmap_index], uvw, lightmaps.data[lightmap_index].light_texture_size, float(visibility)) * lightmaps.data[lightmap_index].exposure_normalization;
 				}
 			}
 		}
