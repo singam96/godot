@@ -38,6 +38,7 @@ class RDShaderFile;
 
 class LightmapperRD : public Lightmapper {
 	GDCLASS(LightmapperRD, Lightmapper)
+	bool direct_visibility_output = false;
 
 	struct BakeParameters {
 		float world_size[3] = {};
@@ -307,6 +308,10 @@ class LightmapperRD : public Lightmapper {
 	BakeError _denoise_oidn(RenderingDevice *p_rd, RID p_source_light_tex, RID p_source_normal_tex, RID p_dest_light_tex, const Size2i &p_atlas_size, int p_atlas_slices, bool p_bake_sh, bool p_shadowmask, const String &p_exe);
 
 public:
+	virtual bool set_direct_visibility_output(bool p_enable) override {
+		direct_visibility_output = p_enable;
+		return true;
+	}
 	virtual void add_mesh(const MeshData &p_mesh) override;
 	virtual void add_directional_light(const String &p_name, bool p_static, const Vector3 &p_direction, const Color &p_color, float p_energy, float p_indirect_energy, float p_angular_distance, float p_shadow_blur) override;
 	virtual void add_omni_light(const String &p_name, bool p_static, const Vector3 &p_position, const Color &p_color, float p_energy, float p_indirect_energy, float p_range, float p_attenuation, float p_size, float p_shadow_blur) override;

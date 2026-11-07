@@ -856,6 +856,25 @@ LightmapGI::BakeError LightmapGI::_save_and_reimport_atlas_textures(const Ref<Li
 
 	for (int i = 0; i < texture_count; i++) {
 		const int texture_slice_count = (i == texture_count - 1 && last_count != 0) ? last_count : slices_per_texture;
+		if (save_native_textures) {
+			Vector<Ref<Image>> layers;
+			for (int j = 0; j < texture_slice_count; j++) {
+				Ref<Image> layer = images[i * slices_per_texture + j];
+				if (supersampling_enabled) {
+					layer = layer->duplicate();
+					layer->resize(layer->get_width() / supersampling_factor, layer->get_height() / supersampling_factor, Image::INTERPOLATE_TRILINEAR);
+				}
+				layers.push_back(layer);
+			}
+			Ref<Texture2DArray> texture;
+			texture.instantiate();
+			ERR_FAIL_COND_V(texture->create_from_images(layers) != OK, BAKE_ERROR_CANT_CREATE_IMAGE);
+			const String atlas_path = p_base_name + "_" + itos(i) + ".res";
+			ERR_FAIL_COND_V(ResourceSaver::save(texture, atlas_path) != OK, BAKE_ERROR_CANT_CREATE_IMAGE);
+			texture->set_path(atlas_path, true);
+			r_textures[i] = texture;
+			continue;
+		}
 
 		Ref<Image> texture_image = Image::create_empty(slice_width, slice_height * texture_slice_count, false, images[0]->get_format());
 
@@ -902,6 +921,7 @@ LightmapGI::BakeError LightmapGI::_save_and_reimport_atlas_textures(const Ref<Li
 		ERR_FAIL_COND_V(save_err, LightmapGI::BAKE_ERROR_CANT_CREATE_IMAGE);
 
 		// Reimport the file.
+		ERR_FAIL_NULL_V_MSG(ResourceLoader::import, BAKE_ERROR_CANT_CREATE_IMAGE, "Texture import requires the editor. Use bake_lightmaps(..., true) to save native texture resources from an offline tool scene.");
 		ResourceLoader::import(atlas_path);
 		Ref<TextureLayered> t = ResourceLoader::load(atlas_path); // If already loaded, it will be updated on refocus?
 		ERR_FAIL_COND_V(t.is_null(), LightmapGI::BAKE_ERROR_CANT_CREATE_IMAGE);
@@ -1062,6 +1082,18 @@ void LightmapGI::_build_area_light_texture_atlas(const Vector<LightmapGI::Lights
 	}
 }
 
+LightmapGI::BakeError LightmapGI::bake_lightmaps(Node *p_from_node, const String &p_image_data_path, bool p_save_native_textures, bool p_direct_visibility) {
+	ERR_FAIL_COND_V_MSG(p_direct_visibility && (!p_save_native_textures || bounces != 0 || directional || use_denoiser || environment_mode != ENVIRONMENT_MODE_DISABLED || shadowmask_mode != LightmapGIData::SHADOWMASK_MODE_NONE), BAKE_ERROR_INVALID_CONFIGURATION, "Direct visibility output requires native textures, zero bounces, no directional packing, environment, denoiser or shadowmask.");
+	const bool previous = save_native_textures;
+	const bool previous_direct = direct_visibility_output;
+	save_native_textures = p_save_native_textures;
+	direct_visibility_output = p_direct_visibility;
+	const BakeError result = bake(p_from_node, p_image_data_path);
+	save_native_textures = previous;
+	direct_visibility_output = previous_direct;
+	return result;
+}
+
 LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_path, Lightmapper::BakeStepFunc p_bake_step, void *p_bake_userdata) {
 	if (p_image_data_path.is_empty()) {
 		if (get_light_data().is_null()) {
@@ -1076,6 +1108,7 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 
 	Ref<Lightmapper> lightmapper = Lightmapper::create();
 	ERR_FAIL_COND_V(lightmapper.is_null(), BAKE_ERROR_NO_LIGHTMAPPER);
+	ERR_FAIL_COND_V_MSG(!lightmapper->set_direct_visibility_output(direct_visibility_output), BAKE_ERROR_NO_LIGHTMAPPER, "The active lightmapper does not support direct visibility output.");
 
 	BakeStepUD bsud;
 	bsud.func = p_bake_step;
@@ -1094,6 +1127,9 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 	{
 		Vector<MeshesFound> meshes_found;
 		_find_meshes_and_lights(p_from_node ? p_from_node : get_parent(), meshes_found, lights_found, probes_found);
+		if (direct_visibility_output) {
+			ERR_FAIL_COND_V_MSG(lights_found.size() != 1 || lights_found[0].light->get_light_type() != RSE::LIGHT_OMNI || lights_found[0].light->get_bake_mode() != Light3D::BAKE_STATIC || lights_found[0].light->is_editor_only() || lights_found[0].light->is_negative() || lights_found[0].light->get_param(Light3D::PARAM_SIZE) != 0.0, BAKE_ERROR_INVALID_CONFIGURATION, "Direct visibility output requires exactly one static point OmniLight3D.");
+		}
 
 		if (meshes_found.is_empty()) {
 			return BAKE_ERROR_NO_MESHES;
@@ -1527,6 +1563,7 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 	}
 
 	gi_data->set_lightmap_textures(lightmap_textures);
+	gi_data->set_meta("direct_visibility", direct_visibility_output);
 
 	if (save_shadowmask) {
 		gi_data->set_shadowmask_textures(shadowmask_textures);
@@ -2082,6 +2119,7 @@ void LightmapGI::_validate_property(PropertyInfo &p_property) const {
 
 void LightmapGI::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_data", "data"), &LightmapGI::set_light_data);
+	ClassDB::bind_method(D_METHOD("bake_lightmaps", "from_node", "image_data_path", "save_native_textures", "direct_visibility"), &LightmapGI::bake_lightmaps, DEFVAL(false), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_light_data"), &LightmapGI::get_light_data);
 
 	ClassDB::bind_method(D_METHOD("set_bake_quality", "bake_quality"), &LightmapGI::set_bake_quality);
@@ -2205,6 +2243,7 @@ void LightmapGI::_bind_methods() {
 	BIND_ENUM_CONSTANT(BAKE_ERROR_LIGHTMAP_TOO_SMALL);
 	BIND_ENUM_CONSTANT(BAKE_ERROR_ATLAS_TOO_SMALL);
 	BIND_ENUM_CONSTANT(BAKE_ERROR_TEXTURE_EXCEEDS_DEVICE_LIMIT);
+	BIND_ENUM_CONSTANT(BAKE_ERROR_INVALID_CONFIGURATION);
 
 	BIND_ENUM_CONSTANT(ENVIRONMENT_MODE_DISABLED);
 	BIND_ENUM_CONSTANT(ENVIRONMENT_MODE_SCENE);

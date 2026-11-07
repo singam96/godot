@@ -32,6 +32,8 @@
 
 #include "scene/3d/visual_instance_3d.h"
 
+class LightmapGIData;
+
 class Light3D : public VisualInstance3D {
 	GDCLASS(Light3D, VisualInstance3D);
 
@@ -88,6 +90,7 @@ private:
 	Color correlated_color = Color(1.0, 1.0, 1.0);
 	float temperature = 6500.0;
 	bool allow_contact_shadows = true;
+	Ref<LightmapGIData> baked_shadow_lightmap;
 	// bind helpers
 
 	virtual void owner_changed_notify() override;
@@ -145,6 +148,7 @@ public:
 
 	void set_bake_mode(BakeMode p_mode);
 	BakeMode get_bake_mode() const;
+	void set_baked_shadow_lightmap(const Ref<LightmapGIData> &p_lightmap, int p_layer_offset);
 
 	void set_projector(const Ref<Texture2D> &p_texture);
 	Ref<Texture2D> get_projector() const;

@@ -67,6 +67,8 @@ private:
 		bool negative = false;
 		bool reverse_cull = false;
 		RSE::LightBakeMode bake_mode = RSE::LIGHT_BAKE_DYNAMIC;
+		RID baked_shadow_lightmap;
+		int baked_shadow_layer_offset = -1;
 		uint32_t max_sdfgi_cascade = 2;
 		uint32_t cull_mask = 0xFFFFFFFF;
 		uint32_t shadow_caster_mask = 0xFFFFFFFF;
@@ -155,7 +157,8 @@ private:
 		float specular_amount;
 		float shadow_opacity;
 
-		float pad[2];
+		float baked_shadow_layer_offset;
+		float baked_shadow_lightmap_index;
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -365,6 +368,7 @@ private:
 		PackedInt32Array tetrahedra;
 		PackedInt32Array bsp_tree;
 		float specular_intensity = 0.0f;
+		uint32_t baked_shadow_light_count = 0;
 
 		struct BSP {
 			static const int32_t EMPTY_LEAF = INT32_MIN;
@@ -516,6 +520,7 @@ public:
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) override;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const override;
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) override;
+	virtual void light_set_baked_shadow_lightmap(RID p_light, RID p_lightmap, int p_layer_offset) override;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) override;
 	virtual void light_set_allow_contact_shadows(RID p_light, bool p_enable) override;
 	virtual bool light_get_allow_contact_shadows(RID p_light) const override;
@@ -1042,6 +1047,10 @@ public:
 
 	virtual void lightmap_set_shadowmask_textures(RID p_lightmap, RID p_shadow) override;
 	virtual RSE::ShadowmaskMode lightmap_get_shadowmask_mode(RID p_lightmap) override;
+	bool lightmap_has_baked_shadow_lights(RID p_lightmap) const {
+		const Lightmap *lightmap = lightmap_owner.get_or_null(p_lightmap);
+		return lightmap && lightmap->baked_shadow_light_count > 0;
+	}
 	virtual void lightmap_set_shadowmask_mode(RID p_lightmap, RSE::ShadowmaskMode p_mode) override;
 	virtual float lightmap_get_specular_intensity(RID p_lightmap) override;
 	virtual void lightmap_set_specular_intensity(RID p_lightmap, float p_intensity) override;

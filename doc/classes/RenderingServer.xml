@@ -2193,6 +2193,15 @@
 				Sets the bake mode to use for the specified 3D light. Equivalent to [member Light3D.light_bake_mode].
 			</description>
 		</method>
+		<method name="light_set_baked_shadow_lightmap">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="lightmap" type="RID" />
+			<param index="2" name="layer_offset" type="int" />
+			<description>
+				Associates a static omni light with its owner lightmap and direct contribution layers. Equivalent to [method Light3D.set_baked_shadow_lightmap]. Pass an empty [RID] and [code]-1[/code] to disable.
+			</description>
+		</method>
 		<method name="light_set_color">
 			<return type="void" />
 			<param index="0" name="light" type="RID" />

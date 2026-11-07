@@ -463,39 +463,7 @@ half get_omni_attenuation(float distance, float inv_range, float decay) {
 	return half(nd * pow(max(distance, 0.0001), -decay));
 }
 
-void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3 vertex_ddx, vec3 vertex_ddy, hvec3 f0, half roughness, half metallic, float taa_frame_count, hvec3 albedo, inout half alpha, vec2 screen_uv, hvec3 energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-		hvec3 backlight,
-#endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-		hvec4 transmittance_color,
-		half transmittance_depth,
-		half transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-		half rim, half rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-		half clearcoat, half clearcoat_roughness, hvec3 vertex_normal,
-#endif
-#ifdef LIGHT_ANISOTROPY_USED
-		hvec3 binormal, hvec3 tangent, half anisotropy,
-#endif
-		inout hvec3 diffuse_light, inout hvec3 specular_light) {
-
-	// Omni light attenuation.
-	vec3 light_rel_vec = omni_lights.data[idx].position - vertex;
-	float light_length = length(light_rel_vec);
-	half omni_attenuation = get_omni_attenuation(light_length, omni_lights.data[idx].inv_radius, omni_lights.data[idx].attenuation);
-
-	// Compute size.
-	half size = half(0.0);
-	if (sc_use_light_soft_shadows() && omni_lights.data[idx].size > 0.0) {
-		half t = half(omni_lights.data[idx].size / max(0.001, light_length));
-		size = half(1.0) / sqrt(half(1.0) + t * t);
-		size = max(half(1.0) - size, half(0.0));
-	}
-
+half light_get_omni_shadow(uint idx, vec3 vertex, hvec3 normal, float taa_frame_count, half omni_attenuation) {
 	half shadow = half(1.0);
 #ifndef SHADOWS_DISABLED
 	// Omni light shadow.
@@ -627,6 +595,44 @@ void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		}
 	}
 #endif
+
+	return shadow;
+}
+
+void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3 vertex_ddx, vec3 vertex_ddy, hvec3 f0, half roughness, half metallic, float taa_frame_count, hvec3 albedo, inout half alpha, vec2 screen_uv, hvec3 energy_compensation,
+#ifdef LIGHT_BACKLIGHT_USED
+		hvec3 backlight,
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+		hvec4 transmittance_color,
+		half transmittance_depth,
+		half transmittance_boost,
+#endif
+#ifdef LIGHT_RIM_USED
+		half rim, half rim_tint,
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+		half clearcoat, half clearcoat_roughness, hvec3 vertex_normal,
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+		hvec3 binormal, hvec3 tangent, half anisotropy,
+#endif
+		inout hvec3 diffuse_light, inout hvec3 specular_light) {
+
+	// Omni light attenuation.
+	vec3 light_rel_vec = omni_lights.data[idx].position - vertex;
+	float light_length = length(light_rel_vec);
+	half omni_attenuation = get_omni_attenuation(light_length, omni_lights.data[idx].inv_radius, omni_lights.data[idx].attenuation);
+
+	// Compute size.
+	half size = half(0.0);
+	if (sc_use_light_soft_shadows() && omni_lights.data[idx].size > 0.0) {
+		half t = half(omni_lights.data[idx].size / max(0.001, light_length));
+		size = half(1.0) / sqrt(half(1.0) + t * t);
+		size = max(half(1.0) - size, half(0.0));
+	}
+
+	half shadow = light_get_omni_shadow(idx, vertex, normal, taa_frame_count, omni_attenuation);
 
 	vec3 color = omni_lights.data[idx].color;
 

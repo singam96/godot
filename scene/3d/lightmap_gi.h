@@ -180,6 +180,7 @@ public:
 		BAKE_ERROR_LIGHTMAP_TOO_SMALL,
 		BAKE_ERROR_ATLAS_TOO_SMALL,
 		BAKE_ERROR_TEXTURE_EXCEEDS_DEVICE_LIMIT,
+		BAKE_ERROR_INVALID_CONFIGURATION,
 	};
 
 	enum EnvironmentMode {
@@ -208,6 +209,8 @@ private:
 	float environment_custom_energy = 1.0;
 	bool directional = false;
 	bool use_texture_for_bounces = true;
+	bool save_native_textures = false;
+	bool direct_visibility_output = false;
 	LightmapGIData::ShadowmaskMode shadowmask_mode = LightmapGIData::SHADOWMASK_MODE_NONE;
 	GenerateProbes gen_probes = GENERATE_PROBES_SUBDIV_8;
 	Ref<CameraAttributes> camera_attributes;
@@ -359,6 +362,7 @@ public:
 	AABB get_aabb() const override;
 
 	BakeError bake(Node *p_from_node, String p_image_data_path = "", Lightmapper::BakeStepFunc p_bake_step = nullptr, void *p_bake_userdata = nullptr);
+	BakeError bake_lightmaps(Node *p_from_node, const String &p_image_data_path, bool p_save_native_textures = false, bool p_direct_visibility = false);
 
 	virtual PackedStringArray get_configuration_warnings() const override;
 

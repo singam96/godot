@@ -103,6 +103,10 @@ void main() {
 #endif
 	} else {
 		vec4 src_color = textureLod(sampler2DArray(src_color_tex, linear_sampler), uv_interp, 0.0);
+#ifdef STORE_DIRECT_VISIBILITY
+		dst_color = src_color; // Both irradiance and visibility use the dynamic blend constant.
+#else
 		dst_color = vec4(src_color.rgb, params.blend); //mix
+#endif
 	}
 }

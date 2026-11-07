@@ -34,6 +34,7 @@
 #include "core/config/project_settings.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
+#include "scene/3d/lightmap_gi.h"
 #include "scene/main/scene_tree.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -166,6 +167,13 @@ void Light3D::set_allow_contact_shadows(bool p_enable) {
 
 bool Light3D::get_allow_contact_shadows() const {
 	return allow_contact_shadows;
+}
+
+void Light3D::set_baked_shadow_lightmap(const Ref<LightmapGIData> &p_lightmap, int p_layer_offset) {
+	ERR_FAIL_COND_MSG(p_lightmap.is_valid() && type != RSE::LIGHT_OMNI, "Baked direct shadow contributions require an OmniLight3D.");
+	ERR_FAIL_COND_MSG(p_lightmap.is_valid() && p_layer_offset < 0, "The baked direct contribution layer offset must be nonnegative.");
+	baked_shadow_lightmap = p_lightmap;
+	RS::get_singleton()->light_set_baked_shadow_lightmap(light, p_lightmap.is_valid() ? p_lightmap->get_rid() : RID(), p_lightmap.is_valid() ? p_layer_offset : -1);
 }
 
 AABB Light3D::get_aabb() const {
@@ -395,6 +403,7 @@ void Light3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_mask", "caster_mask"), &Light3D::set_shadow_caster_mask);
 	ClassDB::bind_method(D_METHOD("get_shadow_caster_mask"), &Light3D::get_shadow_caster_mask);
+	ClassDB::bind_method(D_METHOD("set_baked_shadow_lightmap", "lightmap", "layer_offset"), &Light3D::set_baked_shadow_lightmap);
 
 	ClassDB::bind_method(D_METHOD("set_allow_contact_shadows", "enabled"), &Light3D::set_allow_contact_shadows);
 	ClassDB::bind_method(D_METHOD("get_allow_contact_shadows"), &Light3D::get_allow_contact_shadows);

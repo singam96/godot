@@ -5,7 +5,7 @@
 	</brief_description>
 	<description>
 		The [LightmapGI] node is used to compute and store baked lightmaps. Lightmaps are used to provide high-quality indirect lighting with very little light leaking. [LightmapGI] can also provide rough reflections using spherical harmonics if [member directional] is enabled. Dynamic objects can receive indirect lighting thanks to [i]light probes[/i], which can be automatically placed by setting [member generate_probes_subdiv] to a value other than [constant GENERATE_PROBES_DISABLED]. Additional lightmap probes can also be added by creating [LightmapProbe] nodes. The downside is that lightmaps are fully static and cannot be baked in an exported project. Baking a [LightmapGI] node is also slower compared to [VoxelGI].
-		[b]Procedural generation:[/b] Lightmap baking functionality is only available in the editor. This means [LightmapGI] is not suited to procedurally generated or user-built levels. For procedurally generated or user-built levels, use [VoxelGI] or SDFGI instead (see [member Environment.sdfgi_enabled]).
+		[b]Procedural generation:[/b] Lightmap baking functionality is only available in editor executables. Generated levels can be baked offline using [method bake_lightmaps] and shipped with the resulting resources. For levels generated or built during gameplay, use [VoxelGI] or SDFGI instead (see [member Environment.sdfgi_enabled]).
 		[b]Performance:[/b] [LightmapGI] provides the best possible run-time performance for global illumination. It is suitable for low-end hardware including integrated graphics and mobile devices.
 		[b]Note:[/b] Due to how lightmaps work, most properties only have a visible effect once lightmaps are baked again.
 		[b]Note:[/b] Lightmap baking on [CSGShape3D]s and [PrimitiveMesh]es is not supported, as these cannot store UV2 data required for baking.
@@ -15,6 +15,20 @@
 	<tutorials>
 		<link title="Using Lightmap global illumination">$DOCS_URL/tutorials/3d/global_illumination/using_lightmap_gi.html</link>
 	</tutorials>
+	<methods>
+		<method name="bake_lightmaps">
+			<return type="int" enum="LightmapGI.BakeError" />
+			<param index="0" name="from_node" type="Node" />
+			<param index="1" name="image_data_path" type="String" />
+			<param index="2" name="save_native_textures" type="bool" default="false" />
+			<param index="3" name="direct_visibility" type="bool" default="false" />
+			<description>
+				Bakes the meshes and lights below [param from_node] and saves the lightmap data at [param image_data_path]. Requires an editor executable with a real RenderingDevice renderer and valid static meshes with UV2 and normals. The scene's nodes must have owners so that the bake traversal includes them.
+				When [param save_native_textures] is [code]true[/code], the texture atlases are saved as native [Texture2DArray] resources next to the lightmap data, allowing an offline tool scene to bake without the editor's texture importer. The default retains the usual EXR/PNG import pipeline and requires the editor importer to be active. This method performs an offline bake; it is not intended for gameplay.
+				When [param direct_visibility] is [code]true[/code], RGB stores unoccluded direct irradiance and alpha stores static visibility. This mode requires native textures, exactly one nonnegative static point [OmniLight3D], zero bounces, and disabled environment, directional packing, shadowmask and denoising. It is intended for independent lamp layers used by [method Light3D.set_baked_shadow_lightmap]. Compose RGB multiplied by alpha into the main lightmap, and preserve RGBA in the separate contribution layers. The returned lightmap data has [code skip-lint]direct_visibility[/code] metadata set to [code]true[/code].
+			</description>
+		</method>
+	</methods>
 	<members>
 		<member name="bias" type="float" setter="set_bias" getter="get_bias" default="0.0005">
 			The bias to use when computing shadows. Increasing [member bias] can fix shadow acne on the resulting baked lightmap, but can introduce peter-panning (shadows not connecting to their casters). Real-time [Light3D] shadows are not affected by this [member bias] property.
@@ -167,6 +181,9 @@
 		</constant>
 		<constant name="BAKE_ERROR_TEXTURE_EXCEEDS_DEVICE_LIMIT" value="12" enum="BakeError">
 			Lightmap baking failed as the baking process requires a texture larger than the maximum texture size supported by the rendering device. This can happen when [member supersampling] is enabled with a high [member supersampling_factor].
+		</constant>
+		<constant name="BAKE_ERROR_INVALID_CONFIGURATION" value="13" enum="BakeError">
+			Lightmap baking failed because the requested direct visibility output has an unsupported configuration.
 		</constant>
 		<constant name="ENVIRONMENT_MODE_DISABLED" value="0" enum="EnvironmentMode">
 			Ignore environment lighting when baking lightmaps.

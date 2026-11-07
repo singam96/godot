@@ -235,6 +235,8 @@ directional_lights;
 #define LIGHTMAP_SHADOWMASK_MODE_REPLACE 1
 #define LIGHTMAP_SHADOWMASK_MODE_OVERLAY 2
 #define LIGHTMAP_SHADOWMASK_MODE_ONLY 3
+#define LIGHTMAP_SHADOWMASK_MODE_MASK 3
+#define LIGHTMAP_BAKED_SHADOW_LIGHTS (1u << 2)
 
 struct Lightmap {
 	mat3x4 normal_xform_and_specular_intensity; // "normal_xform" is the 3x3 matrix. "specular_intensity" is the 4th row of the 1st column.

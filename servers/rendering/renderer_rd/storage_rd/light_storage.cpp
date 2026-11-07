@@ -203,6 +203,7 @@ void LightStorage::area_light_initialize(RID p_rid) {
 void LightStorage::light_free(RID p_rid) {
 	light_set_projector(p_rid, RID()); //clear projector
 	light_area_set_texture(p_rid, RID()); //clear area texture
+	light_set_baked_shadow_lightmap(p_rid, RID(), -1);
 
 	// delete the texture
 	Light *light = light_owner.get_or_null(p_rid);
@@ -348,6 +349,23 @@ void LightStorage::light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mo
 
 	light->version++;
 	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+void LightStorage::light_set_baked_shadow_lightmap(RID p_light, RID p_lightmap, int p_layer_offset) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	ERR_FAIL_COND(p_lightmap.is_valid() && !lightmap_owner.owns(p_lightmap));
+	ERR_FAIL_COND(p_lightmap.is_valid() && (light->type != RSE::LIGHT_OMNI || p_layer_offset < 0));
+	Lightmap *previous = lightmap_owner.get_or_null(light->baked_shadow_lightmap);
+	if (previous) {
+		previous->baked_shadow_light_count--;
+	}
+	light->baked_shadow_lightmap = p_lightmap;
+	light->baked_shadow_layer_offset = p_lightmap.is_valid() ? p_layer_offset : -1;
+	Lightmap *current = lightmap_owner.get_or_null(p_lightmap);
+	if (current) {
+		current->baked_shadow_light_count++;
+	}
 }
 
 void LightStorage::light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) {
@@ -1075,6 +1093,20 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_data.specular_amount = light->param[RSE::LIGHT_PARAM_SPECULAR] * 2.0;
 		light_data.volumetric_fog_energy = light->param[RSE::LIGHT_PARAM_VOLUMETRIC_FOG_ENERGY];
 		light_data.bake_mode = light->bake_mode;
+		light_data.baked_shadow_layer_offset = -1.0f;
+		light_data.baked_shadow_lightmap_index = -1.0f;
+		// Lightmap slots are camera-specific. Never apply a lamp's contribution to
+		// a different home's lightmap just because its UV/slice layout matches.
+		if (!using_forward_ids && type == RSE::LIGHT_OMNI && light->bake_mode == RSE::LIGHT_BAKE_STATIC &&
+				light->baked_shadow_layer_offset >= 0 && lightmap_owner.owns(light->baked_shadow_lightmap) && p_render_data->lightmaps) {
+			for (uint32_t j = 0; j < p_render_data->lightmaps->size(); j++) {
+				if (lightmap_instance_get_lightmap((*p_render_data->lightmaps)[j]) == light->baked_shadow_lightmap) {
+					light_data.baked_shadow_layer_offset = light->baked_shadow_layer_offset;
+					light_data.baked_shadow_lightmap_index = j;
+					break;
+				}
+			}
+		}
 
 		float radius = MAX(0.001, light->param[RSE::LIGHT_PARAM_RANGE]);
 		light_data.inv_radius = 1.0 / radius;
@@ -2175,6 +2207,7 @@ void LightStorage::lightmap_set_probe_capture_data(RID p_lightmap, const PackedV
 	lm->bsp_tree = p_bsp_tree;
 	lm->point_sh = p_point_sh;
 	lm->tetrahedra = p_tetrahedra;
+	lm->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHTMAP_CAPTURE);
 }
 
 void LightStorage::lightmap_set_baked_exposure_normalization(RID p_lightmap, float p_exposure) {

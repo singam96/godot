@@ -890,6 +890,9 @@ void main() {
 
 	vec3 light_for_texture = vec3(0.0);
 	vec3 light_for_bounces = vec3(0.0);
+#ifdef STORE_DIRECT_VISIBILITY
+	float direct_visibility = 0.0;
+#endif
 
 #ifdef USE_SHADOWMASK
 	float shadowmask_value = 0.0f;
@@ -912,7 +915,20 @@ void main() {
 		trace_direct_light(position, normal, i, true, light, light_dir, noise, texel_size_world_space, shadow);
 
 		if (lights.data[i].static_bake) {
+#ifdef STORE_DIRECT_VISIBILITY
+			// The wrapper validates a single point omni. Keep irradiance even in
+			// fully occluded texels so bilinear filtering cannot square shadow edges.
+			float distance_to_light = max(distance(position, lights.data[i].position), 0.0001);
+			float attenuation = get_omni_attenuation(distance_to_light, 1.0 / lights.data[i].range, lights.data[i].attenuation);
+			attenuation *= max(0.0, dot(normal, light_dir));
+			light_for_texture = lights.data[i].color * lights.data[i].energy * attenuation;
+			if (shadow > 0.0001) {
+				light_for_texture = light / shadow;
+			}
+			direct_visibility = shadow;
+#else
 			light_for_texture += light;
+#endif
 
 #ifdef USE_SH_LIGHTMAPS
 			// For L0, light needs to be attenuated by dot(normal, light_dir) else it is oversaturated when sampled later.
@@ -969,7 +985,11 @@ void main() {
 	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice * 4 + 3), sh_accum[3]);
 #else
 	light_for_texture *= bake_params.exposure_normalization;
+#ifdef STORE_DIRECT_VISIBILITY
+	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice), vec4(light_for_texture, 1.0 + direct_visibility));
+#else
 	imageStore(accum_light, ivec3(atlas_pos, params.atlas_slice), vec4(light_for_texture, 1.0));
+#endif
 #endif
 
 #ifdef USE_SHADOWMASK

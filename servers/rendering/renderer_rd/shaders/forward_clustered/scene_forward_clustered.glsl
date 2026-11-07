@@ -2205,6 +2205,49 @@ void fragment_shader(in SceneData scene_data) {
 	}
 
 	//finalize ambient light here
+	// A composed lightmap contains independently baked fixed-lamp direct layers.
+	// Remove only a lamp's occluded direct contribution: bounced/ambient light
+	// and the contributions of other lamps must remain intact.
+#ifdef USE_LIGHTMAP
+	if (bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP) && !bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_SH_LIGHTMAP) && bool(lightmaps.data[instances.data[instance_index].gi_offset & 0xFFFF].flags & LIGHTMAP_BAKED_SHADOW_LIGHTS)) {
+		uint lightmap_index = instances.data[instance_index].gi_offset & 0xFFFF;
+		uint lightmap_slice = instances.data[instance_index].gi_offset >> 16;
+		vec2 lightmap_uv = uv2 * instances.data[instance_index].lightmap_uv_scale.zw + instances.data[instance_index].lightmap_uv_scale.xy;
+		vec3 baked_shadow_loss = vec3(0.0);
+		uint item_min, item_max, item_from, item_to;
+		cluster_get_item_range(cluster_offset + implementation_data.max_cluster_element_count_div_32 + cluster_z, item_min, item_max, item_from, item_to);
+		item_from = subgroupBroadcastFirst(subgroupMin(item_from));
+		item_to = subgroupBroadcastFirst(subgroupMax(item_to));
+		for (uint i = item_from; i < item_to; i++) {
+			uint mask = cluster_buffer.data[cluster_offset + i] & cluster_get_range_clip_mask(i, item_min, item_max);
+			uint merged_mask = subgroupBroadcastFirst(subgroupOr(mask));
+			while (merged_mask != 0) {
+				uint bit = findMSB(merged_mask);
+				merged_mask &= ~(1u << bit);
+				if (((1u << bit) & mask) == 0) {
+					continue;
+				}
+				uint index = 32 * i + bit;
+				if (omni_lights.data[index].bake_mode != LIGHT_BAKE_STATIC ||
+						omni_lights.data[index].baked_shadow_layer_offset < 0.0 ||
+						int(omni_lights.data[index].baked_shadow_lightmap_index) != int(lightmap_index) ||
+						!bool(omni_lights.data[index].mask & instances.data[instance_index].layer_mask)) {
+					continue;
+				}
+				half attenuation = get_omni_attenuation(length(omni_lights.data[index].position - vertex), omni_lights.data[index].inv_radius, omni_lights.data[index].attenuation);
+				half visibility = light_get_omni_shadow(index, vertex, normal, scene_data.taa_frame_count, attenuation);
+				vec3 uvw = vec3(lightmap_uv, float(lightmap_slice) + omni_lights.data[index].baked_shadow_layer_offset);
+				if (visibility < half(1.0) && int(uvw.z) < textureSize(sampler2DArray(lightmap_textures[lightmap_index], SAMPLER_LINEAR_CLAMP), 0).z) {
+					vec4 direct_light = textureLod(sampler2DArray(lightmap_textures[lightmap_index], SAMPLER_LINEAR_CLAMP), uvw, 0.0);
+					baked_shadow_loss += direct_light.rgb * lightmaps.data[lightmap_index].exposure_normalization * max(clamp(direct_light.a, 0.0, 1.0) - float(visibility), 0.0);
+				}
+			}
+		}
+		if (any(greaterThan(baked_shadow_loss, vec3(0.0)))) {
+			ambient_light = max(ambient_light - baked_shadow_loss, vec3(0.0));
+		}
+	}
+#endif // USE_LIGHTMAP
 	{
 #ifdef MULTI_BOUNCE_OCCLUSION_ENABLED
 		// Apply multi-bounce ambient-occlusion approximation to ambient light:
@@ -2384,7 +2427,7 @@ void fragment_shader(in SceneData scene_data) {
 
 		if (bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP)) {
 			const uint ofs = instances.data[instance_index].gi_offset & 0xFFFF;
-			shadowmask_mode = lightmaps.data[ofs].flags;
+			shadowmask_mode = lightmaps.data[ofs].flags & LIGHTMAP_SHADOWMASK_MODE_MASK;
 
 			if (shadowmask_mode != LIGHTMAP_SHADOWMASK_MODE_NONE) {
 				const uint slice = instances.data[instance_index].gi_offset >> 16;

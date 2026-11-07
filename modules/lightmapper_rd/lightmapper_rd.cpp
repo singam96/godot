@@ -1105,11 +1105,14 @@ LightmapperRD::BakeError LightmapperRD::_denoise(RenderingDevice *p_rd, Ref<RDSh
 }
 
 LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_denoiser, float p_denoiser_strength, int p_denoiser_range, int p_bounces, float p_bounce_indirect_energy, float p_bias, int p_max_texture_size, bool p_bake_sh, bool p_bake_shadowmask, bool p_texture_for_bounces, GenerateProbes p_generate_probes, const Ref<Image> &p_environment_panorama, const Basis &p_environment_transform, BakeStepFunc p_step_function, void *p_bake_userdata, float p_exposure_normalization, float p_supersampling_factor) {
+	ERR_FAIL_COND_V_MSG(direct_visibility_output && (p_bounces != 0 || p_bake_sh || p_bake_shadowmask || p_use_denoiser || p_environment_panorama.is_valid() || lights.size() != 1 || lights[0].type != LIGHT_TYPE_OMNI || !lights[0].static_bake || lights[0].size != 0.0f), BAKE_ERROR_LIGHTMAP_CANT_PRE_BAKE_MESHES, "Direct visibility output requires one static point omni light, zero bounces, no environment, no directional packing, shadowmask or denoiser.");
 	int denoiser = GLOBAL_GET("rendering/lightmapping/denoising/denoiser");
-	String oidn_path = EDITOR_GET("filesystem/tools/oidn/oidn_denoise_path");
+	String oidn_path;
 
 	if (p_use_denoiser && denoiser == 1) {
 		// OIDN (external).
+		ERR_FAIL_NULL_V_MSG(EditorSettings::get_singleton(), BAKE_ERROR_LIGHTMAP_CANT_PRE_BAKE_MESHES, "External OIDN denoising requires editor settings. Disable denoising or select the built-in denoiser for an offline tool scene.");
+		oidn_path = EDITOR_GET("filesystem/tools/oidn/oidn_denoise_path");
 		Ref<DirAccess> da = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
 
 		if (da->dir_exists(oidn_path)) {
@@ -1647,6 +1650,9 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 
 	if (p_bake_shadowmask) {
 		defines += "\n#define USE_SHADOWMASK\n";
+	}
+	if (direct_visibility_output) {
+		defines += "\n#define STORE_DIRECT_VISIBILITY\n";
 	}
 
 	compute_shader.instantiate();
@@ -2250,7 +2256,7 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 	//shaders
 	Ref<RDShaderFile> blendseams_shader;
 	blendseams_shader.instantiate();
-	err = blendseams_shader->parse_versions_from_text(lm_blendseams_shader_glsl);
+	err = blendseams_shader->parse_versions_from_text(lm_blendseams_shader_glsl, direct_visibility_output ? "#define STORE_DIRECT_VISIBILITY\n" : "");
 	if (err != OK) {
 		FREE_TEXTURES
 		FREE_BUFFERS
@@ -2308,14 +2314,23 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 		RD::PipelineColorBlendState bs = RD::PipelineColorBlendState::create_blend(1);
 		bs.attachments.write[0].src_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
 		bs.attachments.write[0].dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+		BitField<RD::PipelineDynamicStateFlags> blend_dynamic_state;
+		if (direct_visibility_output) {
+			// Visibility is data, so blend it with the same weight as irradiance.
+			bs.attachments.write[0].src_color_blend_factor = RD::BLEND_FACTOR_CONSTANT_ALPHA;
+			bs.attachments.write[0].dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+			bs.attachments.write[0].src_alpha_blend_factor = RD::BLEND_FACTOR_CONSTANT_ALPHA;
+			bs.attachments.write[0].dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+			blend_dynamic_state = RD::DYNAMIC_STATE_BLEND_CONSTANTS;
+		}
 
 		RD::PipelineDepthStencilState ds;
 		ds.enable_depth_test = true;
 		ds.enable_depth_write = true;
 		ds.depth_compare_operator = RD::COMPARE_OP_LESS; //so it does not render same pixel twice, this avoids wrong blending
 
-		RID blendseams_line_raster_pipeline = rd->render_pipeline_create(blendseams_line_raster_shader, rd->framebuffer_get_format(framebuffers[0]), RD::INVALID_FORMAT_ID, RD::RENDER_PRIMITIVE_LINES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), ds, bs, 0);
-		RID blendseams_triangle_raster_pipeline = rd->render_pipeline_create(blendseams_triangle_raster_shader, rd->framebuffer_get_format(framebuffers[0]), RD::INVALID_FORMAT_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), ds, bs, 0);
+		RID blendseams_line_raster_pipeline = rd->render_pipeline_create(blendseams_line_raster_shader, rd->framebuffer_get_format(framebuffers[0]), RD::INVALID_FORMAT_ID, RD::RENDER_PRIMITIVE_LINES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), ds, bs, blend_dynamic_state);
+		RID blendseams_triangle_raster_pipeline = rd->render_pipeline_create(blendseams_triangle_raster_shader, rd->framebuffer_get_format(framebuffers[0]), RD::INVALID_FORMAT_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), ds, bs, blend_dynamic_state);
 
 		uint32_t seam_offset = 0;
 		uint32_t triangle_offset = 0;
@@ -2358,6 +2373,9 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 					seams_push_constant.uv_offset[0] = (uv_offsets[0].x - 0.5f) / float(atlas_size.width);
 					seams_push_constant.uv_offset[1] = (uv_offsets[0].y - 0.5f) / float(atlas_size.height);
 					seams_push_constant.blend = uv_offsets[0].z;
+					if (direct_visibility_output) {
+						rd->draw_list_set_blend_constants(draw_list, Color(0, 0, 0, seams_push_constant.blend));
+					}
 
 					rd->draw_list_set_push_constant(draw_list, &seams_push_constant, sizeof(RasterSeamsPushConstant));
 					rd->draw_list_draw(draw_list, false, 1, slice_seam_count[i] * 4);
@@ -2369,6 +2387,9 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 					seams_push_constant.base_index = triangle_offset;
 					rd->draw_list_bind_render_pipeline(draw_list, blendseams_triangle_raster_pipeline);
 					seams_push_constant.blend = 0; //do not draw them, just fill the z-buffer so its used as a mask
+					if (direct_visibility_output) {
+						rd->draw_list_set_blend_constants(draw_list, Color(0, 0, 0, 0));
+					}
 
 					rd->draw_list_set_push_constant(draw_list, &seams_push_constant, sizeof(RasterSeamsPushConstant));
 					rd->draw_list_draw(draw_list, false, 1, slice_triangle_count[i] * 3);
@@ -2382,6 +2403,9 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 					seams_push_constant.uv_offset[0] = (uv_offsets[j].x - 0.5f) / float(atlas_size.width);
 					seams_push_constant.uv_offset[1] = (uv_offsets[j].y - 0.5f) / float(atlas_size.height);
 					seams_push_constant.blend = uv_offsets[0].z;
+					if (direct_visibility_output) {
+						rd->draw_list_set_blend_constants(draw_list, Color(0, 0, 0, seams_push_constant.blend));
+					}
 
 					rd->draw_list_set_push_constant(draw_list, &seams_push_constant, sizeof(RasterSeamsPushConstant));
 					rd->draw_list_draw(draw_list, false, 1, slice_seam_count[i] * 4);
@@ -2409,7 +2433,17 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 	for (int i = 0; i < atlas_slices * (p_bake_sh ? 4 : 1); i++) {
 		Vector<uint8_t> s = rd->texture_get_data(light_accum_tex, i);
 		Ref<Image> img = Image::create_from_data(atlas_size.width, atlas_size.height, false, Image::FORMAT_RGBAH, s);
-		img->convert(Image::FORMAT_RGBH); //remove alpha
+		if (direct_visibility_output) {
+			// Intermediate alpha is 1 + visibility so fully shadowed texels remain
+			// valid to the normal atlas dilation pass. Decode only after filtering.
+			uint16_t *pixels = reinterpret_cast<uint16_t *>(s.ptrw());
+			for (int64_t alpha = 3; alpha < s.size() / 2; alpha += 4) {
+				pixels[alpha] = Math::make_half_float(CLAMP(Math::half_to_float(pixels[alpha]) - 1.0f, 0.0f, 1.0f));
+			}
+			img->set_data(atlas_size.width, atlas_size.height, false, Image::FORMAT_RGBAH, s);
+		} else {
+			img->convert(Image::FORMAT_RGBH); //remove alpha
+		}
 		lightmap_textures.push_back(img);
 	}
 

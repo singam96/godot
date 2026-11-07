@@ -498,6 +498,9 @@ public:
 		static void dependency_changed(Dependency::DependencyChangedNotification p_notification, DependencyTracker *tracker) {
 			Instance *instance = (Instance *)tracker->userdata;
 			switch (p_notification) {
+				case Dependency::DEPENDENCY_CHANGED_LIGHTMAP_CAPTURE: {
+					singleton->_instance_queue_update(instance, false, false);
+				} break;
 				case Dependency::DEPENDENCY_CHANGED_SKELETON_DATA:
 				case Dependency::DEPENDENCY_CHANGED_SKELETON_BONES:
 				case Dependency::DEPENDENCY_CHANGED_AABB: {

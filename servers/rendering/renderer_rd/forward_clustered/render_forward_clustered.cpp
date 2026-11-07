@@ -1280,6 +1280,9 @@ void RenderForwardClustered::_setup_lightmaps(const RenderDataRD *p_render_data,
 		// Exposure.
 		scene_state.lightmaps[i].exposure_normalization = 1.0;
 		scene_state.lightmaps[i].flags = light_storage->lightmap_get_shadowmask_mode(lightmap);
+		if (light_storage->lightmap_has_baked_shadow_lights(lightmap)) {
+			scene_state.lightmaps[i].flags |= 1 << 2;
+		}
 		if (p_render_data->camera_attributes.is_valid()) {
 			float baked_exposure = light_storage->lightmap_get_baked_exposure_normalization(lightmap);
 			float enf = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
