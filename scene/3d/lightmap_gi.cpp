@@ -240,7 +240,7 @@ void LightmapGIData::update_specular_intensity(float p_intensity) {
 
 void LightmapGIData::set_baked_sun_shadow_layers(Light3D *p_sun, int p_first_layer_offset, int p_second_layer_offset) {
 	ERR_FAIL_COND_MSG(p_sun && (p_sun->get_light_type() != RSE::LIGHT_DIRECTIONAL || uses_spherical_harmonics || p_first_layer_offset < 0 || p_second_layer_offset < 0), "Baked sun layers require a directional light, non-directional lightmaps and nonnegative layer offsets.");
-	RS::get_singleton()->lightmap_set_baked_sun_shadow_layers(lightmap, p_sun ? p_sun->get_base() : RID(), p_sun ? p_first_layer_offset : -1, p_sun ? p_second_layer_offset : -1);
+	RS::get_singleton()->lightmap_set_baked_sun_shadow_layers(lightmap, p_sun ? p_sun->get_light_rid() : RID(), p_sun ? p_first_layer_offset : -1, p_sun ? p_second_layer_offset : -1);
 }
 
 void LightmapGIData::set_capture_data(const AABB &p_bounds, bool p_interior, const PackedVector3Array &p_points, const PackedColorArray &p_point_sh, const PackedInt32Array &p_tetrahedra, const PackedInt32Array &p_bsp_tree, float p_baked_exposure, uint32_t p_lightprobe_hash) {

@@ -129,6 +129,7 @@ func _run() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 10.0
+	camera.far = 30.0
 	fixture.add_child(camera)
 	camera.position = Vector3(0, 10, 0)
 	camera.look_at(Vector3.ZERO, Vector3.BACK)
@@ -269,7 +270,7 @@ func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
 	check(_difference(_sample(unshadowed, clear_point), _sample(reference, clear_point)) < 0.03, "sampled sun does not add live direct light twice on its owner")
 	actor.visible = true
 	var shadowed := await _image()
-	check(_difference(_sample(shadowed, shadow_point), Color(0.2, 0.2, 0.2)) < 0.03, "moving actor shadows both weighted sun samples while preserving ambient")
+	check(_difference(_sample(shadowed, shadow_point), Color(0.2, 0.2, 0.2)) < 0.03, "moving actor shadows both weighted sun samples while preserving ambient (observed %s)" % _sample(shadowed, shadow_point))
 	check(_value(_sample(shadowed, Vector3(0, 2, 0))) > _value(actor_unlit) + 0.04, "sampled sun retains live direct illumination on dynamic actors")
 	var static_shadow_point := Vector3(1.7, 0, -2)
 	check(_difference(_sample(shadowed, static_shadow_point), _sample(reference, static_shadow_point)) < 0.03, "zero-energy moving-shadow sun excludes current-direction static shadows from interpolated lightmaps")
@@ -327,6 +328,10 @@ func _native_bake_and_stationary_probes() -> void:
 	var folder := "user://baked_direct_fixture_%d" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(folder)
 	var output := folder.path_join("fixture.lmbake")
+	# Newly created materials need their render-thread uniform resources ready
+	# before the synchronous UV2 draw; no editor frame runs inside the bake.
+	await process_frame
+	await RenderingServer.frame_post_draw
 	var result: int = gi.call("bake_lightmaps", bake_root, output, true)
 	check(result == LightmapGI.BAKE_ERROR_OK, "offline native bake succeeds without editor texture import")
 	if result != LightmapGI.BAKE_ERROR_OK:

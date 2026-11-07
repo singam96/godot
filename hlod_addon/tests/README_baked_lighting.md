@@ -14,6 +14,8 @@ Success prints `BAKED_DIRECT_SHADOW_TESTS checks=33 failures=0`. Native bake out
 
 The fixture does not measure performance. The opt-in path preserves ordinary static shadow casters for correct lighting on moving meshes, so shadow rendering remains a cost. Other renderers and directional lightmaps retain standard behavior.
 
+The orthographic fixture camera uses a 30 m far plane; directional shadow max distance does not shorten an orthographic camera's shadow frustum. Before the first synchronous bake, the fixture waits for a process frame and post-draw so newly created materials have render-thread uniform sets. Offline tools creating new meshes/materials should do the same before calling `bake_lightmaps`.
+
 Forward+ supports 32 visible lightmaps when both sampled-image limits (per stage and per descriptor set) are at least 128. The light and shadowmask array uses 64 image slots, leaving 64 for other scene/material images; it uses the existing shared samplers. Devices below this capability retain the previous eight-map budget. Mobile is unchanged. Run `-- --budget-only` to isolate the grid test; the comparison engine is expected to fail with only eight of twelve colors matched on a capable device.
 
 ## Offline/runtime contract
