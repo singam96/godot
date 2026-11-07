@@ -2757,7 +2757,7 @@ void fragment_shader(in SceneData scene_data) {
 					LIGHTMAP_SHADOWMASK_MODE_NONE
 #endif
 						,
-						vertex_shadow);
+						scene_data.taa_frame_count, scene_data.directional_shadow_pixel_size, vertex_shadow);
 #ifdef USE_VERTEX_LIGHTING
 				if (directional_lights.data[i].shadow_opacity > 0.001) {
 					diffuse_light *= mix(1.0, vertex_shadow, diffuse_light_interp.a);
