@@ -1083,7 +1083,7 @@ layout(location = 2) out vec2 motion_vector;
 #include "../scene_forward_gi_inc.glsl"
 #include "../scene_forward_lights_inc.glsl"
 
-float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 screen_uv, float shadowmask, uint shadowmask_mode, out float vertex_shadow) {
+float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 screen_uv, float shadowmask, uint shadowmask_mode, float taa_frame_count, vec2 directional_shadow_pixel_size, out float vertex_shadow) {
 	vertex_shadow = 1.0;
 #ifndef SHADOWS_DISABLED
 	float shadow = 1.0;
@@ -1116,7 +1116,7 @@ float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 sc
 				float range_begin = directional_lights.data[i].shadow_range_begin.x;
 				float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 				vec2 tex_scale = directional_lights.data[i].uv_scale1 * test_radius;
-				shadow = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+				shadow = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, taa_frame_count);
 				blend_count++;
 			}
 
@@ -1132,7 +1132,7 @@ float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 sc
 				float range_begin = directional_lights.data[i].shadow_range_begin.y;
 				float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 				vec2 tex_scale = directional_lights.data[i].uv_scale2 * test_radius;
-				float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+				float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, taa_frame_count);
 
 				if (blend_count == 0) {
 					shadow = s;
@@ -1157,7 +1157,7 @@ float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 sc
 				float range_begin = directional_lights.data[i].shadow_range_begin.z;
 				float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 				vec2 tex_scale = directional_lights.data[i].uv_scale3 * test_radius;
-				float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+				float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, taa_frame_count);
 
 				if (blend_count == 0) {
 					shadow = s;
@@ -1182,7 +1182,7 @@ float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 sc
 				float range_begin = directional_lights.data[i].shadow_range_begin.w;
 				float test_radius = (range_pos - range_begin) * directional_lights.data[i].softshadow_angle;
 				vec2 tex_scale = directional_lights.data[i].uv_scale4 * test_radius;
-				float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, scene_data.taa_frame_count);
+				float s = sample_directional_soft_shadow(directional_shadow_atlas, pssm_coord.xyz, tex_scale * directional_lights.data[i].soft_shadow_scale, taa_frame_count);
 
 				if (blend_count == 0) {
 					shadow = s;
@@ -1233,7 +1233,7 @@ float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 sc
 
 			pssm_coord /= pssm_coord.w;
 
-			shadow = sample_directional_pcf_shadow(directional_shadow_atlas, scene_data.directional_shadow_pixel_size * directional_lights.data[i].soft_shadow_scale * (blur_factor + (1.0 - blur_factor) * float(directional_lights.data[i].blend_splits)), pssm_coord, scene_data.taa_frame_count);
+			shadow = sample_directional_pcf_shadow(directional_shadow_atlas, directional_shadow_pixel_size * directional_lights.data[i].soft_shadow_scale * (blur_factor + (1.0 - blur_factor) * float(directional_lights.data[i].blend_splits)), pssm_coord, taa_frame_count);
 
 			if (directional_lights.data[i].blend_splits) {
 				float pssm_blend;
@@ -1267,7 +1267,7 @@ float light_get_directional_shadow(uint i, vec3 vertex, vec3 geo_normal, vec2 sc
 
 				pssm_coord /= pssm_coord.w;
 
-				float shadow2 = sample_directional_pcf_shadow(directional_shadow_atlas, scene_data.directional_shadow_pixel_size * directional_lights.data[i].soft_shadow_scale * (blur_factor2 + (1.0 - blur_factor2) * float(directional_lights.data[i].blend_splits)), pssm_coord, scene_data.taa_frame_count);
+				float shadow2 = sample_directional_pcf_shadow(directional_shadow_atlas, directional_shadow_pixel_size * directional_lights.data[i].soft_shadow_scale * (blur_factor2 + (1.0 - blur_factor2) * float(directional_lights.data[i].blend_splits)), pssm_coord, taa_frame_count);
 				shadow = mix(shadow, shadow2, pssm_blend);
 			}
 		}
@@ -2510,7 +2510,7 @@ void fragment_shader(in SceneData scene_data) {
 		int sun_index = int(sun_data.x);
 		if (sun_index >= 0 && sun_index < int(scene_data.directional_light_count) && bool(directional_lights.data[sun_index].mask & instances.data[instance_index].layer_mask)) {
 			float unused_vertex_shadow;
-			float shadow = light_get_directional_shadow(uint(sun_index), vertex, geo_normal, screen_uv, 1.0, LIGHTMAP_SHADOWMASK_MODE_NONE, unused_vertex_shadow);
+			float shadow = light_get_directional_shadow(uint(sun_index), vertex, geo_normal, screen_uv, 1.0, LIGHTMAP_SHADOWMASK_MODE_NONE, scene_data.taa_frame_count, scene_data.directional_shadow_pixel_size, unused_vertex_shadow);
 			float visibility = mix(1.0, shadow, directional_lights.data[sun_index].shadow_opacity);
 			if (visibility < 1.0) {
 				uint slice = instances.data[instance_index].gi_offset >> 16;
