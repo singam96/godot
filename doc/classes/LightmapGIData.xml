@@ -9,6 +9,16 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="set_baked_sun_shadow_layers">
+			<return type="void" />
+			<param index="0" name="sun" type="Light3D" />
+			<param index="1" name="first_layer_offset" type="int" />
+			<param index="2" name="second_layer_offset" type="int" />
+			<description>
+				Associates this non-directional lightmap with a [DirectionalLight3D] and two time-sampled direct visibility layer groups. Each layer contains RGB irradiance already multiplied by its time and weather weight, with the original baked visibility in alpha. The main atlas must contain the sum of each weighted RGB multiplied by its alpha. Both groups use the same UV layout and exposure as the main atlas. For each group, the shader subtracts only the live shadow loss using the main lightmap's filter.
+				The association belongs to this data resource, so one sun can serve many independently streamed lightmaps. It is runtime-only and can be set before the texture is assigned. Keep the live sun's [member Light3D.light_bake_mode] set to [constant Light3D.BAKE_DYNAMIC]. Direct sun is skipped only for this owner's mapped meshes; dynamic objects and unassociated surfaces keep regular live sunlight and shadows. Pass [code]null[/code] and [code]-1[/code] for both offsets to disable. Supported only in Forward+ with non-directional lightmaps. Static casters still render into live shadow maps.
+			</description>
+		</method>
 		<method name="add_user">
 			<return type="void" />
 			<param index="0" name="path" type="NodePath" />

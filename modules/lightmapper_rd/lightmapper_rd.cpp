@@ -1105,7 +1105,7 @@ LightmapperRD::BakeError LightmapperRD::_denoise(RenderingDevice *p_rd, Ref<RDSh
 }
 
 LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_denoiser, float p_denoiser_strength, int p_denoiser_range, int p_bounces, float p_bounce_indirect_energy, float p_bias, int p_max_texture_size, bool p_bake_sh, bool p_bake_shadowmask, bool p_texture_for_bounces, GenerateProbes p_generate_probes, const Ref<Image> &p_environment_panorama, const Basis &p_environment_transform, BakeStepFunc p_step_function, void *p_bake_userdata, float p_exposure_normalization, float p_supersampling_factor) {
-	ERR_FAIL_COND_V_MSG(direct_visibility_output && (p_bounces != 0 || p_bake_sh || p_bake_shadowmask || p_use_denoiser || p_environment_panorama.is_valid() || lights.size() != 1 || lights[0].type != LIGHT_TYPE_OMNI || !lights[0].static_bake || lights[0].size != 0.0f), BAKE_ERROR_LIGHTMAP_CANT_PRE_BAKE_MESHES, "Direct visibility output requires one static point omni light, zero bounces, no environment, no directional packing, shadowmask or denoiser.");
+	ERR_FAIL_COND_V_MSG(direct_visibility_output && (p_bounces != 0 || p_bake_sh || p_bake_shadowmask || p_use_denoiser || p_environment_panorama.is_valid() || lights.size() != 1 || (lights[0].type != LIGHT_TYPE_OMNI && lights[0].type != LIGHT_TYPE_DIRECTIONAL) || !lights[0].static_bake || lights[0].size != 0.0f), BAKE_ERROR_LIGHTMAP_CANT_PRE_BAKE_MESHES, "Direct visibility output requires one static point omni or zero-angular directional light, zero bounces, no environment, no directional packing, shadowmask or denoiser.");
 	int denoiser = GLOBAL_GET("rendering/lightmapping/denoising/denoiser");
 	String oidn_path;
 

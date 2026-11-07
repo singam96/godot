@@ -916,10 +916,13 @@ void main() {
 
 		if (lights.data[i].static_bake) {
 #ifdef STORE_DIRECT_VISIBILITY
-			// The wrapper validates a single point omni. Keep irradiance even in
+			// The wrapper validates a single point source. Keep irradiance even in
 			// fully occluded texels so bilinear filtering cannot square shadow edges.
-			float distance_to_light = max(distance(position, lights.data[i].position), 0.0001);
-			float attenuation = get_omni_attenuation(distance_to_light, 1.0 / lights.data[i].range, lights.data[i].attenuation);
+			float attenuation = 1.0;
+			if (lights.data[i].type == LIGHT_TYPE_OMNI) {
+				float distance_to_light = max(distance(position, lights.data[i].position), 0.0001);
+				attenuation = get_omni_attenuation(distance_to_light, 1.0 / lights.data[i].range, lights.data[i].attenuation);
+			}
 			attenuation *= max(0.0, dot(normal, light_dir));
 			light_for_texture = lights.data[i].color * lights.data[i].energy * attenuation;
 			if (shadow > 0.0001) {

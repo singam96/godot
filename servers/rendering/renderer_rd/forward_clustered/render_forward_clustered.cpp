@@ -1280,6 +1280,11 @@ void RenderForwardClustered::_setup_lightmaps(const RenderDataRD *p_render_data,
 		// Exposure.
 		scene_state.lightmaps[i].exposure_normalization = 1.0;
 		scene_state.lightmaps[i].flags = light_storage->lightmap_get_shadowmask_mode(lightmap);
+		const Vector3 sun_shadow = light_storage->lightmap_get_baked_sun_shadow_layers(lightmap);
+		scene_state.lightmaps[i].baked_sun_shadow[0] = sun_shadow.x;
+		scene_state.lightmaps[i].baked_sun_shadow[1] = sun_shadow.y;
+		scene_state.lightmaps[i].baked_sun_shadow[2] = sun_shadow.z;
+		scene_state.lightmaps[i].baked_sun_shadow[3] = 0.0f;
 		if (light_storage->lightmap_has_baked_shadow_lights(lightmap)) {
 			scene_state.lightmaps[i].flags |= 1 << 2;
 		}

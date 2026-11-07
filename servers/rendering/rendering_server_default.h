@@ -556,6 +556,7 @@ public:
 	FUNC2(lightmap_set_shadowmask_mode, RID, RSE::ShadowmaskMode)
 	FUNC1R(float, lightmap_get_specular_intensity, RID)
 	FUNC2(lightmap_set_specular_intensity, RID, float)
+	FUNC4(lightmap_set_baked_sun_shadow_layers, RID, RID, int, int)
 
 	/* Shadow Atlas */
 	FUNC0R(RID, shadow_atlas_create)

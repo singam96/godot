@@ -2706,6 +2706,7 @@ void RenderingServer::_bind_methods() {
 	/* LIGHTMAP */
 
 	ClassDB::bind_method(D_METHOD("lightmap_create"), &RenderingServer::lightmap_create);
+	ClassDB::bind_method(D_METHOD("lightmap_set_baked_sun_shadow_layers", "lightmap", "sun", "first_layer_offset", "second_layer_offset"), &RenderingServer::lightmap_set_baked_sun_shadow_layers);
 	ClassDB::bind_method(D_METHOD("lightmap_set_textures", "lightmap", "light", "uses_sh"), &RenderingServer::lightmap_set_textures);
 	ClassDB::bind_method(D_METHOD("lightmap_set_probe_bounds", "lightmap", "bounds"), &RenderingServer::lightmap_set_probe_bounds);
 	ClassDB::bind_method(D_METHOD("lightmap_set_probe_interior", "lightmap", "interior"), &RenderingServer::lightmap_set_probe_interior);

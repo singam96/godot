@@ -180,6 +180,7 @@ func _run() -> void:
 	var disabled := await _image()
 	check(absf(_value(_sample(disabled, shadow_point)) - clear_value) < 0.03, "disabling restores standard STATIC behavior")
 	await _spatial_filtering(texture, shadow_point, clear_point)
+	await _sun_shadow_layers(shadow_point, clear_point)
 	await _native_bake_and_stationary_probes()
 	await _visible_lightmap_budget()
 	fixture.queue_free()
@@ -218,6 +219,49 @@ func _spatial_filtering(texture: Texture2DArray, shadow_point: Vector3, clear_po
 		check(largest_error < 0.025, "%s filtering removes spatially varying RGB and visibility without residuals (error %.4f)" % [mode, largest_error])
 	RenderingServer.lightmaps_set_bicubic_filter(true)
 	lamp.call("set_baked_shadow_lightmap", null, -1)
+
+
+func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-45, -90, 0)
+	sun.light_energy = 0.4
+	sun.light_bake_mode = Light3D.BAKE_DYNAMIC
+	sun.shadow_enabled = true
+	sun.shadow_caster_mask = 2
+	sun.shadow_normal_bias = 0.01
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 20.0
+	fixture.add_child(sun)
+	var a := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	a.fill(Color(0.3, 0.05, 0.1, 0.8))
+	var b := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	b.fill(Color(0.05, 0.1, 0.3, 0.4))
+	var base := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	base.fill(Color(0.46, 0.28, 0.4, 1))
+	var texture := Texture2DArray.new()
+	texture.create_from_images([base, a, b])
+	owner_data.set_lightmap_textures([texture])
+	actor.visible = true
+	var standard := await _image()
+	sun.visible = false
+	var reference := await _image()
+	var actor_unlit := _sample(reference, Vector3(0, 2, 0))
+	owner_data.call("set_baked_sun_shadow_layers", sun, 1, 2)
+	sun.visible = true
+	actor.visible = false
+	var unshadowed := await _image()
+	check(_difference(_sample(unshadowed, clear_point), _sample(reference, clear_point)) < 0.03, "sampled sun does not add live direct light twice on its owner")
+	actor.visible = true
+	var shadowed := await _image()
+	check(_difference(_sample(shadowed, shadow_point), Color(0.2, 0.2, 0.2)) < 0.03, "moving actor shadows both weighted sun samples while preserving ambient")
+	check(_value(_sample(shadowed, Vector3(0, 2, 0))) > _value(actor_unlit) + 0.04, "sampled sun retains live direct illumination on dynamic actors")
+	owner_data.call("set_baked_sun_shadow_layers", null, -1, -1)
+	other_data.call("set_baked_sun_shadow_layers", sun, 1, 2)
+	var isolated := await _image()
+	check(_difference(_sample(isolated, shadow_point), _sample(standard, shadow_point)) < 0.03, "sun layer associations remain isolated to their owner and disabling restores live sunlight")
+	other_data.call("set_baked_sun_shadow_layers", null, -1, -1)
+	sun.queue_free()
+	await process_frame
 
 
 func _native_bake_and_stationary_probes() -> void:
@@ -301,6 +345,25 @@ func _native_bake_and_stationary_probes() -> void:
 				found_shadowed_irradiance = found_shadowed_irradiance or (color.a < 0.1 and _value(color) > 0.001)
 				found_lit_irradiance = found_lit_irradiance or (color.a > 0.9 and _value(color) > 0.001)
 	check(found_visibility and found_shadowed_irradiance and found_lit_irradiance, "visibility retains fully occluded irradiance and both shadowed and lit texels")
+	var lamp_users: Array = data.call("_get_user_data")
+	bake_lamp.light_bake_mode = Light3D.BAKE_DISABLED
+	var bake_sun := DirectionalLight3D.new()
+	bake_sun.rotation_degrees = Vector3(-45, -90, 0)
+	bake_sun.light_bake_mode = Light3D.BAKE_STATIC
+	bake_root.add_child(bake_sun)
+	bake_sun.owner = bake_root
+	result = gi.call("bake_lightmaps", bake_root, folder.path_join("sun_visibility.lmbake"), true, true)
+	check(result == LightmapGI.BAKE_ERROR_OK, "directional sun direct visibility bake succeeds")
+	if result != LightmapGI.BAKE_ERROR_OK:
+		return
+	data = gi.light_data
+	check(data.call("_get_user_data") == lamp_users and data.get_meta("direct_visibility", false) and data.lightmap_textures[0].get_format() == Image.FORMAT_RGBAH, "sun direct bake preserves the atlas and RGBA visibility format")
+	gi.light_data = null
+	var remaining_users: Array = []
+	for user in range(0, lamp_users.size(), 4):
+		if gi.get_node(lamp_users[user]) == floor_mesh:
+			remaining_users.append_array(lamp_users.slice(user, user + 4))
+	data.call("_set_user_data", remaining_users)
 	blocker.queue_free()
 	await process_frame
 	gi.light_data = data
@@ -312,6 +375,7 @@ func _native_bake_and_stationary_probes() -> void:
 	figure.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
 	bake_root.add_child(figure)
 	bake_lamp.visible = false
+	bake_sun.visible = false
 	camera.global_position = Vector3(100, 10, 0)
 	camera.look_at(Vector3(100, 0, 0), Vector3.BACK)
 	var capture: Dictionary = data.call("_get_probe_data")

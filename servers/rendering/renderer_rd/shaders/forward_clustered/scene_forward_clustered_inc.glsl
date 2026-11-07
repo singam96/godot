@@ -243,6 +243,7 @@ struct Lightmap {
 	vec2 light_texture_size;
 	float exposure_normalization;
 	uint flags;
+	vec4 baked_sun_shadow; // Per-view directional index and the two weighted direct layer offsets.
 };
 
 layout(set = 0, binding = 8, std140) restrict readonly buffer Lightmaps {

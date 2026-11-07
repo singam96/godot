@@ -270,6 +270,7 @@ private:
 		float texture_size[2];
 		float exposure_normalization;
 		uint32_t flags;
+		float baked_sun_shadow[4];
 	};
 
 	struct LightmapCaptureData {

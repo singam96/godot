@@ -751,6 +751,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	Transform3D inverse_transform = p_camera_transform.affine_inverse();
 
 	r_directional_light_count = 0;
+	directional_light_ids.clear();
 	r_positional_light_count = 0;
 
 	omni_light_count = 0;
@@ -899,6 +900,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					light_data.fade_to = -light_data.shadow_split_offsets[limit];
 				}
 
+				directional_light_ids.push_back(light_instance->light);
 				r_directional_light_count++;
 			} break;
 			case RSE::LIGHT_OMNI: {
@@ -2385,6 +2387,30 @@ void LightStorage::lightmap_set_specular_intensity(RID p_lightmap, float p_inten
 	ERR_FAIL_NULL(lm);
 
 	lm->specular_intensity = p_intensity;
+}
+
+void LightStorage::lightmap_set_baked_sun_shadow_layers(RID p_lightmap, RID p_sun, int p_first_layer_offset, int p_second_layer_offset) {
+	Lightmap *lm = lightmap_owner.get_or_null(p_lightmap);
+	ERR_FAIL_NULL(lm);
+	if (p_sun.is_valid()) {
+		const Light *sun = light_owner.get_or_null(p_sun);
+		ERR_FAIL_COND(!sun || sun->type != RSE::LIGHT_DIRECTIONAL || lm->uses_spherical_harmonics || p_first_layer_offset < 0 || p_second_layer_offset < 0);
+	}
+	lm->baked_sun = p_sun;
+	lm->baked_sun_first_layer = p_sun.is_valid() ? p_first_layer_offset : -1;
+	lm->baked_sun_second_layer = p_sun.is_valid() ? p_second_layer_offset : -1;
+}
+
+Vector3 LightStorage::lightmap_get_baked_sun_shadow_layers(RID p_lightmap) const {
+	const Lightmap *lm = lightmap_owner.get_or_null(p_lightmap);
+	if (lm && lm->baked_sun.is_valid() && light_owner.owns(lm->baked_sun) && !lm->uses_spherical_harmonics) {
+		for (uint32_t i = 0; i < directional_light_ids.size(); i++) {
+			if (directional_light_ids[i] == lm->baked_sun) {
+				return Vector3(i, lm->baked_sun_first_layer, lm->baked_sun_second_layer);
+			}
+		}
+	}
+	return Vector3(-1, -1, -1);
 }
 
 /* LIGHTMAP INSTANCE */

@@ -141,6 +141,7 @@ public:
 	bool has_shadowmask_textures();
 
 	void update_specular_intensity(float p_intensity);
+	void set_baked_sun_shadow_layers(Light3D *p_sun, int p_first_layer_offset, int p_second_layer_offset);
 
 	virtual RID get_rid() const override;
 	LightmapGIData();

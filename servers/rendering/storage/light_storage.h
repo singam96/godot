@@ -194,6 +194,7 @@ public:
 	virtual void lightmap_set_shadowmask_mode(RID p_lightmap, RSE::ShadowmaskMode p_mode) = 0;
 	virtual float lightmap_get_specular_intensity(RID p_lightmap) = 0;
 	virtual void lightmap_set_specular_intensity(RID p_lightmap, float p_intensity) = 0;
+	virtual void lightmap_set_baked_sun_shadow_layers(RID p_lightmap, RID p_sun, int p_first_layer_offset, int p_second_layer_offset) = 0;
 
 	/* LIGHTMAP INSTANCE */
 

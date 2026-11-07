@@ -2294,6 +2294,16 @@
 				[b]Note:[/b] The equivalent node is [LightmapGI].
 			</description>
 		</method>
+		<method name="lightmap_set_baked_sun_shadow_layers">
+			<return type="void" />
+			<param index="0" name="lightmap" type="RID" />
+			<param index="1" name="sun" type="RID" />
+			<param index="2" name="first_layer_offset" type="int" />
+			<param index="3" name="second_layer_offset" type="int" />
+			<description>
+				Associates an owner lightmap with its directional sun and two weighted direct visibility layer groups. Equivalent to [method LightmapGIData.set_baked_sun_shadow_layers]. Pass an empty sun [RID] and [code]-1[/code] offsets to disable.
+			</description>
+		</method>
 		<method name="lightmap_get_probe_capture_bsp_tree" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="lightmap" type="RID" />

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/templates/local_vector.h"
 #include "core/templates/paged_array.h"
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
@@ -231,6 +232,7 @@ private:
 
 	uint32_t max_directional_lights;
 	DirectionalLightData *directional_lights = nullptr;
+	LocalVector<RID> directional_light_ids;
 	RID directional_light_buffer;
 
 	/* REFLECTION PROBE */
@@ -369,6 +371,9 @@ private:
 		PackedInt32Array bsp_tree;
 		float specular_intensity = 0.0f;
 		uint32_t baked_shadow_light_count = 0;
+		RID baked_sun;
+		int baked_sun_first_layer = -1;
+		int baked_sun_second_layer = -1;
 
 		struct BSP {
 			static const int32_t EMPTY_LEAF = INT32_MIN;
@@ -1054,6 +1059,8 @@ public:
 	virtual void lightmap_set_shadowmask_mode(RID p_lightmap, RSE::ShadowmaskMode p_mode) override;
 	virtual float lightmap_get_specular_intensity(RID p_lightmap) override;
 	virtual void lightmap_set_specular_intensity(RID p_lightmap, float p_intensity) override;
+	virtual void lightmap_set_baked_sun_shadow_layers(RID p_lightmap, RID p_sun, int p_first_layer_offset, int p_second_layer_offset) override;
+	Vector3 lightmap_get_baked_sun_shadow_layers(RID p_lightmap) const;
 
 	virtual float lightmap_get_probe_capture_update_speed() const override {
 		return lightmap_probe_capture_update_speed;

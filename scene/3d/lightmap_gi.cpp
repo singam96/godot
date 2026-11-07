@@ -238,6 +238,11 @@ void LightmapGIData::update_specular_intensity(float p_intensity) {
 	RS::get_singleton()->lightmap_set_specular_intensity(lightmap, p_intensity);
 }
 
+void LightmapGIData::set_baked_sun_shadow_layers(Light3D *p_sun, int p_first_layer_offset, int p_second_layer_offset) {
+	ERR_FAIL_COND_MSG(p_sun && (p_sun->get_light_type() != RSE::LIGHT_DIRECTIONAL || uses_spherical_harmonics || p_first_layer_offset < 0 || p_second_layer_offset < 0), "Baked sun layers require a directional light, non-directional lightmaps and nonnegative layer offsets.");
+	RS::get_singleton()->lightmap_set_baked_sun_shadow_layers(lightmap, p_sun ? p_sun->get_base() : RID(), p_sun ? p_first_layer_offset : -1, p_sun ? p_second_layer_offset : -1);
+}
+
 void LightmapGIData::set_capture_data(const AABB &p_bounds, bool p_interior, const PackedVector3Array &p_points, const PackedColorArray &p_point_sh, const PackedInt32Array &p_tetrahedra, const PackedInt32Array &p_bsp_tree, float p_baked_exposure, uint32_t p_lightprobe_hash) {
 	if (p_points.size()) {
 		int pc = p_points.size();
@@ -343,6 +348,7 @@ Array LightmapGIData::_get_light_textures_data() const {
 #endif
 
 void LightmapGIData::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_baked_sun_shadow_layers", "sun", "first_layer_offset", "second_layer_offset"), &LightmapGIData::set_baked_sun_shadow_layers);
 	ClassDB::bind_method(D_METHOD("_set_user_data", "data"), &LightmapGIData::_set_user_data);
 	ClassDB::bind_method(D_METHOD("_get_user_data"), &LightmapGIData::_get_user_data);
 
@@ -1128,7 +1134,7 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 		Vector<MeshesFound> meshes_found;
 		_find_meshes_and_lights(p_from_node ? p_from_node : get_parent(), meshes_found, lights_found, probes_found);
 		if (direct_visibility_output) {
-			ERR_FAIL_COND_V_MSG(lights_found.size() != 1 || lights_found[0].light->get_light_type() != RSE::LIGHT_OMNI || lights_found[0].light->get_bake_mode() != Light3D::BAKE_STATIC || lights_found[0].light->is_editor_only() || lights_found[0].light->is_negative() || lights_found[0].light->get_param(Light3D::PARAM_SIZE) != 0.0, BAKE_ERROR_INVALID_CONFIGURATION, "Direct visibility output requires exactly one static point OmniLight3D.");
+			ERR_FAIL_COND_V_MSG(lights_found.size() != 1 || (lights_found[0].light->get_light_type() != RSE::LIGHT_OMNI && lights_found[0].light->get_light_type() != RSE::LIGHT_DIRECTIONAL) || lights_found[0].light->get_bake_mode() != Light3D::BAKE_STATIC || lights_found[0].light->is_editor_only() || lights_found[0].light->is_negative() || lights_found[0].light->get_param(Light3D::PARAM_SIZE) != 0.0, BAKE_ERROR_INVALID_CONFIGURATION, "Direct visibility output requires exactly one static point OmniLight3D or zero-angular-size DirectionalLight3D.");
 		}
 
 		if (meshes_found.is_empty()) {
