@@ -197,7 +197,7 @@ func _native_bake_and_stationary_probes() -> void:
 	bake_root.add_child(probe)
 	probe.owner = bake_root
 	var gi := LightmapGI.new()
-	gi.bake_quality = LightmapGI.BAKE_QUALITY_LOW
+	gi.quality = LightmapGI.BAKE_QUALITY_LOW
 	gi.bounces = 0
 	gi.directional = false
 	gi.use_denoiser = false
