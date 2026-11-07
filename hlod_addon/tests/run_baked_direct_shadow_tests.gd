@@ -3,6 +3,8 @@ extends SceneTree
 ## godot --path hlod_addon --rendering-method forward_plus -s res://tests/run_baked_direct_shadow_tests.gd
 ## -- --baseline-only exercises the fixture's legacy path on an unmodified engine.
 
+signal device_limits_read(limits: Vector2i)
+
 var failures := 0
 var checks := 0
 var camera: Camera3D
@@ -142,6 +144,11 @@ func _run() -> void:
 		print("BAKED_DIRECT_BASELINE checks=%d failures=%d" % [checks, failures])
 		quit(0 if failures == 0 else 1)
 		return
+	if OS.get_cmdline_user_args().has("--budget-only"):
+		await _visible_lightmap_budget()
+		print("BAKED_DIRECT_BUDGET checks=%d failures=%d" % [checks, failures])
+		quit(0 if failures == 0 else 1)
+		return
 	if not lamp.has_method("set_baked_shadow_lightmap") or not gi.has_method("bake_lightmaps"):
 		printerr("BAKED_DIRECT_SHADOW_CUSTOM_ENGINE_REQUIRED")
 		quit(2)
@@ -174,6 +181,7 @@ func _run() -> void:
 	check(absf(_value(_sample(disabled, shadow_point)) - clear_value) < 0.03, "disabling restores standard STATIC behavior")
 	await _spatial_filtering(texture, shadow_point, clear_point)
 	await _native_bake_and_stationary_probes()
+	await _visible_lightmap_budget()
 	fixture.queue_free()
 	await process_frame
 	print("BAKED_DIRECT_SHADOW_TESTS checks=%d failures=%d" % [checks, failures])
@@ -322,3 +330,50 @@ func _native_bake_and_stationary_probes() -> void:
 	await create_timer(1.0).timeout
 	var blue := _sample(await _image(), Vector3(100, 1, 0))
 	check(red.r > red.b + 0.1 and blue.b > blue.r + 0.1, "changed probe data relights a stationary dynamic object")
+
+
+func _read_device_limits() -> void:
+	var rd := RenderingServer.get_rendering_device()
+	device_limits_read.emit.call_deferred(Vector2i(rd.limit_get(RenderingDevice.LIMIT_MAX_TEXTURES_PER_SHADER_STAGE), rd.limit_get(RenderingDevice.LIMIT_MAX_TEXTURES_PER_UNIFORM_SET)))
+
+
+func _visible_lightmap_budget() -> void:
+	RenderingServer.call_on_render_thread(_read_device_limits)
+	var limits: Vector2i = await device_limits_read
+	var count := 12 if limits.x >= 128 and limits.y >= 128 else 8
+	var grid := Node3D.new()
+	fixture.add_child(grid)
+	var positions: Array[Vector3] = []
+	var colors: Array[Color] = []
+	var valid := true
+	for i in count:
+		var at := Vector3(200 + (i % 4 - 1.5) * 2.0, 0, (i / 4 - 1) * 2.0)
+		var color := Color(0.15 + i * 0.017, 0.35 - i * 0.009, 0.18 + i * 0.01)
+		positions.append(at)
+		colors.append(color)
+		var visual := MeshInstance3D.new()
+		visual.mesh = _plane(Vector2.ONE)
+		visual.position = at
+		visual.gi_mode = GeometryInstance3D.GI_MODE_STATIC
+		grid.add_child(visual)
+		var gi := LightmapGI.new()
+		gi.position = at - Vector3.ONE * 0.5
+		grid.add_child(gi)
+		var image := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+		image.fill(color)
+		var texture := Texture2DArray.new()
+		valid = texture.create_from_images([image]) == OK and valid
+		var data := LightmapGIData.new()
+		data.lightmap_textures = [texture]
+		data.add_user(gi.get_path_to(visual), Rect2(0, 0, 1, 1), 0, -1)
+		gi.light_data = data
+	camera.global_position = Vector3(200, 10, 0)
+	camera.look_at(Vector3(200, 0, 0), Vector3.BACK)
+	var image := await _image()
+	var matching := 0
+	for i in count:
+		if _difference(_sample(image, positions[i]), colors[i]) < 0.025:
+			matching += 1
+	check(valid and matching == count, "%d independent visible lightmaps retain their own colors (%d matched, device limits %s)" % [count, matching, limits])
+	grid.queue_free()
+	await process_frame

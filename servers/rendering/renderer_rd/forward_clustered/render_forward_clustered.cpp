@@ -5418,7 +5418,12 @@ RenderForwardClustered::RenderForwardClustered() {
 
 		{
 			//lightmaps
-			scene_state.max_lightmaps = MAX_LIGHTMAPS;
+			// Each lightmap binds both a lighting and a shadowmask texture. Leave
+			// 64 sampled images for the remaining scene and material bindings, and
+			// preserve the original budget on devices below this capability.
+			const uint64_t textures_per_stage = RD::get_singleton()->limit_get(RD::LIMIT_MAX_TEXTURES_PER_SHADER_STAGE);
+			const uint64_t textures_per_set = RD::get_singleton()->limit_get(RD::LIMIT_MAX_TEXTURES_PER_UNIFORM_SET);
+			scene_state.max_lightmaps = textures_per_stage >= 128 && textures_per_set >= 128 ? MAX_LIGHTMAPS : 8;
 			defines += "\n#define MAX_LIGHTMAP_TEXTURES " + itos(scene_state.max_lightmaps) + "\n";
 			defines += "\n#define MAX_LIGHTMAPS " + itos(scene_state.max_lightmaps) + "\n";
 
