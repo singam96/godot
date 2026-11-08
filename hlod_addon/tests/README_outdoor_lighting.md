@@ -3,7 +3,7 @@
 `RenderingServer.environment_set_baked_outdoor_lighting(env, sun_base, textures,
 parameters, pages, receiver_mask, moving_mask)` is a Forward+ extension. Passing
 an empty sun RID clears it. The host keeps texture resources alive until clearing
-the environment. The source sun RID is `DirectionalLight3D.get_base()`.
+the environment. The source sun RID is `DirectionalLight3D.get_light_rid()`.
 
 Textures: coarse static reverse-Z depth array, persistent fine-depth page pool,
 optional coarse RGBA ambient field and persistent fine ambient-field page pool.
@@ -58,3 +58,7 @@ baked-direct and context fixtures as well; these tests do not establish FPS.
 `--negative-context-control` deliberately restores the invalid packed-camera
 multiplication and must reject all three stages. This guards the first rendered
 candidate's compilation failure before another engine rebuild.
+
+Light3D initializes its visual instance directly and leaves the inherited
+VisualInstance3D base RID empty. Use the explicit get_light_rid() binding; an
+empty sun RID intentionally clears the environment cache.

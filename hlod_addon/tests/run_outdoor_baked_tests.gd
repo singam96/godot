@@ -37,7 +37,7 @@ func _array(images: Array[Image]) -> Texture2DArray:
 
 
 func _bind_cache_pages(pages: PackedInt32Array) -> void:
-	RenderingServer.call(API, environment.get_rid(), sun.get_base(), textures, parameters, pages, 16, 8)
+	RenderingServer.call(API, environment.get_rid(), sun.call("get_light_rid"), textures, parameters, pages, 16, 8)
 
 
 func _image() -> Image:
@@ -49,9 +49,7 @@ func _image() -> Image:
 func _value(image: Image, point: Vector3) -> float:
 	var at := Vector2i(camera.unproject_position(point))
 	var color := image.get_pixelv(at).srgb_to_linear()
-	var value := (color.r + color.g + color.b) / 3.0
-	print("OUTDOOR_PIXEL point=", point, " value=", value)
-	return value
+	return (color.r + color.g + color.b) / 3.0
 
 
 func _plane(parent: Node, at: Vector3, layers: int) -> MeshInstance3D:
@@ -106,6 +104,7 @@ func _run() -> void:
 	sun.shadow_caster_mask = 8
 	sun.directional_shadow_max_distance = 30
 	fixture.add_child(sun)
+	_check((sun.call("get_light_rid") as RID).is_valid(), "native sun RID is exposed independently of VisualInstance base")
 	var floor_mesh := _plane(fixture, Vector3.ZERO, 16)
 	var actor := _plane(fixture, Vector3(2.2, 0, 0), 1 | 8)
 	var maps := _array([_depth(0.0), _depth(0.8)])
@@ -128,13 +127,6 @@ func _run() -> void:
 	var original := _value(reference, Vector3.ZERO)
 	_bind_cache_pages(PackedInt32Array([-1, -1]))
 	var open := await _image()
-	RenderingServer.call_on_render_thread(func():
-		var rd := RenderingServer.get_rendering_device()
-		for texture in textures:
-			var rid := RenderingServer.texture_get_rd_texture(texture)
-			var format := rd.texture_get_format(rid)
-			print("OUTDOOR_TEXTURE type=", format.texture_type, " layers=", format.array_layers, " usage=", format.usage_bits)
-	)
 	_check(absf(_value(open, Vector3.ZERO) - original) < 0.025, "cached radiance replaces ordinary sun once")
 	_check(absf(_value(open, actor.position) - _value(reference, actor.position)) < 0.025, "unmapped actor retains ordinary lighting")
 	parameters[56] = 1.0
