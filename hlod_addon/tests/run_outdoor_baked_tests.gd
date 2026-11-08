@@ -229,6 +229,8 @@ func _run() -> void:
 		var columns := [slope_projection.x, slope_projection.y, slope_projection.z, slope_projection.w]
 		for column in 4:
 			for component in 4: parameters[sample_index * 16 + column * 4 + component] = columns[column][component]
+	parameters[57] = 0.00001
+	parameters[58] = 0.00001
 	var slope_image := Image.create(32, 32, false, Image.FORMAT_RF)
 	for row in 32:
 		for column in 32: slope_image.set_pixel(column, row, Color(0.1 + 0.4 * (row + 0.5) / 32.0, 0, 0))
@@ -238,6 +240,14 @@ func _run() -> void:
 	_bind_cache_pages(PackedInt32Array([-1, -1]))
 	var slope_receiver := await _image()
 	_check(absf(_value(slope_receiver, Vector3.ZERO) - original) < 0.025, "receiver-plane filtering does not self-shadow an open sloped depth field")
+	for row in 32:
+		for column in 32: slope_image.set_pixel(column, row, Color(0.1 + 0.4 * ((row + 0.5) / 32.0 - 0.125) / 0.75, 0, 0))
+	var fine_slope := _array([slope_image])
+	textures[1] = fine_slope.get_rid()
+	parameters[59] = 0.125
+	_bind_cache_pages(PackedInt32Array([0, -1]))
+	var fine_slope_receiver := await _image()
+	_check(absf(_value(fine_slope_receiver, Vector3.ZERO) - original) < 0.025, "fine receiver-plane correction includes page gutters and coordinate scale")
 	parameters = initial_parameters.duplicate()
 	textures = [maps.get_rid(), fine.get_rid()]
 	sun.light_energy = 0.4

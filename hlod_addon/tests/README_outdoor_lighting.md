@@ -71,3 +71,7 @@ fixture: 39 checks; bake context: 13 checks. All pass without shader diagnostics
 Receiver-plane depth correction is applied to each comparison tap, including
 the fine-page coordinate scale. A sloped-depth fixture fails on 0c7a72d without
 this correction; increasing a global normal offset is not used to hide it.
+
+Final slope fixture acceptance on 5d7d31d: 31 checks pass. The same fixture
+with the same 0.00001 normalized roundoff allowance fails both slope cases
+on 0c7a72d. This allowance is far smaller than the map pixel depth difference.
