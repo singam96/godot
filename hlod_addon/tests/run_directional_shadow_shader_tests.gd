@@ -20,6 +20,13 @@ func _initialize() -> void:
 		printerr("DIRECTIONAL_SHADOW_EXPECTED_TWO_CALL_SITES count=", calls.size())
 		quit(1)
 		return
+	var guard_pattern := RegEx.new()
+	guard_pattern.compile("if \\(!bool\\(directional_lights\\.data\\[i\\]\\.mask[\\s\\S]*?\\n\\s*\\}")
+	var guards := guard_pattern.search_all(scene)
+	if guards.size() != 3:
+		printerr("DIRECTIONAL_SHADOW_EXPECTED_THREE_REGULAR_GUARDS count=", guards.size())
+		quit(1)
+		return
 	# Keep native field and argument types. Sampling stubs isolate shader interface
 	# compilation; the rendered baked-direct fixture checks the complete pipeline.
 	var declarations := """
@@ -33,6 +40,8 @@ layout(set=0,binding=1) uniform texture2D directional_shadow_atlas;
 layout(set=0,binding=2) uniform sampler SAMPLER_LINEAR_CLAMP;
 layout(set=0,binding=3) uniform texture2DArray sscs_buffer;
 layout(set=0,binding=4,std140) uniform Implementation {uint ss_effects_flags;} implementation_data;
+struct InstanceDataTest {uint layer_mask;};
+layout(set=0,binding=5,std430) readonly buffer Instances {InstanceDataTest data[];} instances;
 bool sc_use_directional_soft_shadows(){return false;}
 float sample_directional_soft_shadow(texture2D tex,vec3 coord,vec2 scale,float taa){return 1.0;}
 float sample_directional_pcf_shadow(texture2D tex,vec2 scale,vec4 coord,float taa){return 1.0;}
@@ -43,11 +52,13 @@ layout(location=0) out vec4 output_color;
 void main(){
  SceneData scene_data=SceneData(0.0,vec2(1.0/1024.0));
  vec3 vertex=vec3(0,0,-10); vec3 geo_normal=vec3(0,1,0); vec2 screen_uv=vec2(0.5);
- uint i=0u; int sun_index=0; float shadowmask=1.0; uint shadowmask_mode=0u;
+ uint i=0u; uint instance_index=0u; int sun_index=0; float shadowmask=1.0; uint shadowmask_mode=0u;
  float vertex_shadow=1.0; float unused_vertex_shadow=1.0; output_color=vec4(0);
 """
 	for call: RegExMatch in calls:
 		main += "\n{\n" + call.get_string() + "\noutput_color+=vec4(shadow);\n}\n"
+	for guard: RegExMatch in guards:
+		main += "\nfor(uint i=0u;i<8u;i++){\n" + guard.get_string() + "\noutput_color+=vec4(1);\n}\n"
 	main += "\n}\n"
 	var negative := OS.get_cmdline_user_args().has("--negative-control")
 	if negative:

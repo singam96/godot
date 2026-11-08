@@ -628,8 +628,8 @@ void vertex_shader(vec3 vertex_input,
 		vec3 directional_specular = vec3(0.0);
 
 		for (uint i = 0; i < scene_data.directional_light_count; i++) {
-			if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask)) {
-				continue; // Not masked, skip.
+			if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask) || directional_lights.data[i].energy == 0.0) {
+				continue; // Not masked or zero energy.
 			}
 
 			if (bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP) && (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC
@@ -2737,8 +2737,8 @@ void fragment_shader(in SceneData scene_data) {
 			}
 #endif
 
-				if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask)) {
-					continue; //not masked
+				if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask) || directional_lights.data[i].energy == 0.0) {
+					continue; // Not masked or zero energy.
 				}
 
 				if (bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP) && (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC
@@ -2793,8 +2793,8 @@ void fragment_shader(in SceneData scene_data) {
 				break;
 			}
 
-			if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask)) {
-				continue; //not masked
+			if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask) || directional_lights.data[i].energy == 0.0) {
+				continue; // Not masked or zero energy.
 			}
 
 			if (bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_LIGHTMAP) && (directional_lights.data[i].bake_mode == LIGHT_BAKE_STATIC

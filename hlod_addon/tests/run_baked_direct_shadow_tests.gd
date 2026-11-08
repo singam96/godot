@@ -284,6 +284,7 @@ func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
 	check(_value(_sample(statically_shadowed_actor, Vector3(0, 2, 0))) < _value(_sample(shadowed, Vector3(0, 2, 0))) - 0.04, "main sun retains static-caster shadows on dynamic actors")
 	actor_blocker.queue_free()
 	await process_frame
+	await _zero_energy_sun_lighting(sun, moving_shadows, shadow_point)
 	owner_data.call("set_baked_sun_shadow_layers", null, -1, -1)
 	other_data.call("set_baked_sun_shadow_layers", moving_shadows, 1, 2)
 	var isolated := await _image()
@@ -292,6 +293,49 @@ func _sun_shadow_layers(shadow_point: Vector3, clear_point: Vector3) -> void:
 	sun.queue_free()
 	moving_shadows.queue_free()
 	static_blocker.queue_free()
+	await process_frame
+
+
+func _zero_energy_sun_lighting(sun: DirectionalLight3D, moving_shadows: DirectionalLight3D, shadow_point: Vector3) -> void:
+	var panel := MeshInstance3D.new()
+	panel.mesh = _plane(Vector2.ONE)
+	panel.position = Vector3(-3, 0.02, 2)
+	panel.layers = 4
+	panel.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	panel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var material := ShaderMaterial.new()
+	material.shader = Shader.new()
+	material.shader.code = "shader_type spatial; render_mode ambient_light_disabled, specular_disabled; void fragment() { ALBEDO = vec3(1.0); } void light() { DIFFUSE_LIGHT += vec3(0.125, 0.25, 0.5); }"
+	panel.material_override = material
+	var sun_mask := sun.light_cull_mask
+	var lamp_mask := lamp.light_cull_mask
+	sun.light_cull_mask &= ~4
+	lamp.light_cull_mask &= ~4
+	fixture.add_child(panel)
+	moving_shadows.visible = false
+	var hidden := await _image()
+	var baseline := _sample(hidden, panel.position)
+	check(_value(baseline) < 0.005, "unmapped custom-light fixture is dark without the shadow-only sun")
+	moving_shadows.visible = true
+	var zero := await _image()
+	check(_difference(_sample(zero, panel.position), baseline) < 0.015, "zero-energy shadow-only sun does not invoke regular custom lighting on unmapped geometry")
+	moving_shadows.light_energy = 1.0
+	var positive := await _image()
+	check(_value(_sample(positive, panel.position)) > _value(baseline) + 0.04, "positive-energy directional light still invokes custom lighting")
+	moving_shadows.light_energy = 0.00000001
+	var faint := await _image()
+	check(_value(_sample(faint, panel.position)) > _value(baseline) + 0.04, "tiny positive directional energy is not suppressed by an epsilon guard")
+	moving_shadows.light_energy = 1.0
+	moving_shadows.light_negative = true
+	var negative := await _image()
+	check(_value(_sample(negative, panel.position)) > _value(baseline) + 0.04, "negative directional energy still invokes custom lighting")
+	moving_shadows.light_negative = false
+	moving_shadows.light_energy = 0.0
+	var restored := await _image()
+	check(_difference(_sample(restored, shadow_point), Color(0.2, 0.2, 0.2)) < 0.03, "zero-energy helper retains mapped moving-shadow subtraction after regular-light controls")
+	sun.light_cull_mask = sun_mask
+	lamp.light_cull_mask = lamp_mask
+	panel.queue_free()
 	await process_frame
 
 
