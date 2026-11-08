@@ -270,6 +270,23 @@ func _run() -> void:
 	var fixed_mask := await _image()
 	_check(absf(_value(fixed_mask, Vector3.ZERO) - original) < 0.025, "fixed receiver layer cannot enter moving-only sun passes")
 	moving.queue_free()
+	var surface := floor_mesh.material_override as StandardMaterial3D
+	surface.emission_enabled = true
+	surface.emission = Color(0.4, 0.3, 0.2)
+	surface.emission_energy_multiplier = 0.1
+	parameters[43] = 1
+	_bind_cache_pages(PackedInt32Array([-1, -1]))
+	var emitted_shadow := await _image()
+	_check(_value(emitted_shadow, Vector3.ZERO) > _value(blocked, Vector3.ZERO) + 0.003 && _value(emitted_shadow, Vector3.ZERO) < original * 0.5, "cached diffuse shadows preserve authored material emission")
+	surface.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS
+	surface.albedo_color = Color(1, 1, 1, 0.8)
+	var alpha_shadow := await _image()
+	RenderingServer.call(API, environment.get_rid(), RID(), [], PackedFloat32Array(), PackedInt32Array(), 0, 0)
+	var alpha_open := await _image()
+	_check(_value(alpha_shadow, Vector3.ZERO) < _value(alpha_open, Vector3.ZERO) * 0.5, "alpha depth-prepass receivers use the environment cache in the transparent pass")
+	surface.emission_enabled = false
+	surface.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	surface.albedo_color = Color.WHITE
 	RenderingServer.call(API, environment.get_rid(), RID(), [], PackedFloat32Array(), PackedInt32Array(), 0, 0)
 	var restored := await _image()
 	_check(absf(_value(restored, Vector3.ZERO) - original) < 0.025, "disabling restores the original path")

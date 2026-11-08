@@ -75,3 +75,7 @@ this correction; increasing a global normal offset is not used to hide it.
 Final slope fixture acceptance on 5d7d31d: 31 checks pass. The same fixture
 with the same 0.00001 normalized roundoff allowance fails both slope cases
 on 0c7a72d. This allowance is far smaller than the map pixel depth difference.
+
+Additional material acceptance on 5d7d31d: 33 checks pass. Emissive
+materials preserve their authored emission while sampled visibility shadows
+the diffuse contribution; alpha depth-prepass receivers use the same cache.
