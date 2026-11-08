@@ -177,6 +177,51 @@ func _run() -> void:
 	var owned := await _image()
 	_check(_value(owned, Vector3.ZERO) < original * 0.4, "original environment retains its own cache")
 	sun.shadow_enabled = true
+	parameters[43] = 0
+	var wrong_type := ImageTexture.create_from_image(_depth(0.8))
+	resources.append(wrong_type)
+	textures[1] = wrong_type.get_rid()
+	_bind_cache_pages(PackedInt32Array([0, -1]))
+	var unavailable_fine := await _image()
+	_check(absf(_value(unavailable_fine, Vector3.ZERO) - original) < 0.025, "unready/wrong-dimension fine storage uses valid coarse depth")
+	textures[0] = wrong_type.get_rid()
+	_bind_cache_pages(PackedInt32Array([-1, -1]))
+	var unavailable_coarse := await _image()
+	_check(absf(_value(unavailable_coarse, Vector3.ZERO) - original) < 0.025, "wrong-dimension coarse storage cannot activate array descriptors")
+	textures[0] = maps.get_rid()
+	textures[1] = fine.get_rid()
+	var ambient_image := Image.create(8, 8, false, Image.FORMAT_RGBAH)
+	ambient_image.fill(Color(0, 0.25, 0.5, 1))
+	var coarse_ambient := ImageTexture.create_from_image(ambient_image)
+	resources.append(coarse_ambient)
+	ambient_image = ambient_image.duplicate()
+	ambient_image.fill(Color(0, 0.75, 0.75, 1))
+	var fine_ambient := _array([ambient_image])
+	textures.append(coarse_ambient.get_rid())
+	textures.append(fine_ambient.get_rid())
+	parameters[72] = -4
+	parameters[73] = -4
+	parameters[74] = 8
+	parameters[75] = 8
+	parameters[76] = 1
+	parameters[77] = 1
+	parameters[78] = 1
+	for component in 3:
+		parameters[40 + component] = 0
+		parameters[44 + component] = 0
+	sun.light_energy = 0
+	_bind_cache_pages(PackedInt32Array([-1, -1, -1]))
+	var sky_coarse := await _image()
+	_check(absf(_value(sky_coarse, Vector3.ZERO) - 0.025) < 0.015, "static ambient uses baked spatial sky visibility")
+	_check(absf(_value(sky_coarse, actor.position) - 0.025) < 0.015, "outdoor actor ambient uses sky field")
+	_bind_cache_pages(PackedInt32Array([-1, -1, 0]))
+	var sky_fine := await _image()
+	_check(absf(_value(sky_fine, Vector3.ZERO) - 0.075) < 0.015, "resident fine sky field replaces coarse")
+	textures[3] = coarse_ambient.get_rid()
+	_bind_cache_pages(PackedInt32Array([-1, -1, 0]))
+	var sky_fallback := await _image()
+	_check(absf(_value(sky_fallback, Vector3.ZERO) - 0.025) < 0.015, "unready fine sky storage preserves valid coarse visibility")
+	sun.light_energy = 0.4
 	RenderingServer.call(API, environment.get_rid(), RID(), [], PackedFloat32Array(), PackedInt32Array(), 0, 0)
 	var restored := await _image()
 	_check(absf(_value(restored, Vector3.ZERO) - original) < 0.025, "disabling restores the original path")

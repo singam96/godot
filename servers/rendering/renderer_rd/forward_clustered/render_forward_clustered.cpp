@@ -4050,17 +4050,19 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		memset(bytes.ptrw() + 16 + Outdoor::PARAMETER_FLOATS * 4, 0xFF, Outdoor::PAGE_ENTRIES * 4);
 		const Outdoor *data = p_render_data ? RendererEnvironmentStorage::get_singleton()->environment_get_baked_outdoor_lighting(p_render_data->environment) : nullptr;
 		RID textures[4];
-		bool depth_available[2] = {};
+		bool available[4] = {};
 		for (int i = 0; i < 4; i++) {
 			textures[i] = texture_storage->texture_rd_get_default(i == 2 ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE);
 			if (data && i < data->textures.size()) {
 				RID source = data->textures[i];
 				if (source.is_valid() && texture_storage->owns_texture(source)) {
 					RID rd_texture = texture_storage->texture_get_rd_texture(source);
-					if (rd_texture.is_valid()) {
-						textures[i] = rd_texture;
-						if (i < 2) {
-							depth_available[i] = true;
+					if (rd_texture.is_valid() && RD::get_singleton()->texture_is_valid(rd_texture)) {
+						RD::TextureFormat format = RD::get_singleton()->texture_get_format(rd_texture);
+						RD::TextureType expected_type = i == 2 ? RD::TEXTURE_TYPE_2D : RD::TEXTURE_TYPE_2D_ARRAY;
+						if (format.texture_type == expected_type && (format.usage_bits & RD::TEXTURE_USAGE_SAMPLING_BIT)) {
+							textures[i] = rd_texture;
+							available[i] = true;
 						}
 					}
 				}
@@ -4071,7 +4073,7 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 			texture.append_id(textures[i]);
 			uniforms.push_back(texture);
 		}
-		if (data && depth_available[0] && depth_available[1]) {
+		if (data && available[0]) {
 			uint32_t *info = reinterpret_cast<uint32_t *>(bytes.ptrw());
 			info[0] = 1;
 			info[1] = light_storage->light_get_directional_index(data->sun);
@@ -4080,6 +4082,21 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 			memcpy(bytes.ptrw() + 16, data->parameters.ptr(), Outdoor::PARAMETER_FLOATS * 4);
 			if (!data->pages.is_empty()) {
 				memcpy(bytes.ptrw() + 16 + Outdoor::PARAMETER_FLOATS * 4, data->pages.ptr(), data->pages.size() * 4);
+			}
+			float *parameters = reinterpret_cast<float *>(bytes.ptrw() + 16);
+			int32_t *pages = reinterpret_cast<int32_t *>(bytes.ptrw() + 16 + Outdoor::PARAMETER_FLOATS * 4);
+			int sun_entries = int(parameters[60] * parameters[61] + parameters[62] * parameters[63]);
+			if (!available[1]) {
+				for (int i = 0; i < sun_entries; i++) {
+					pages[i] = -1;
+				}
+			}
+			if (!available[2]) {
+				parameters[78] = 0;
+			} else if (!available[3]) {
+				for (uint32_t i = sun_entries; i < Outdoor::PAGE_ENTRIES; i++) {
+					pages[i] = -1;
+				}
 			}
 		}
 		RID buffer = scene_state.outdoor_lighting_buffers[p_uniform_buffer_index];

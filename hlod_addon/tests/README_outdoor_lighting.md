@@ -30,7 +30,9 @@ radiance, so a zero-energy night sample cannot dilute a daytime shadow.
 Static receivers reconstruct diffuse irradiance and spatial sky fill instead of
 ordinary sunlight/ambient; the renderer applies exposure and albedo once. Moving
 objects retain their material lighting and combine cached static visibility with
-live moving visibility. Ordinary RGB lightmaps are excluded. Their existing sun
+live moving visibility. Outdoor actors also receive the baked sky field;
+existing SH captures, lightmaps, SDFGI/VoxelGI and custom irradiance retain priority.
+Ordinary RGB lightmaps are excluded. Their existing sun
 subtraction helper remains moving-only, allowing one shared primary sun.
 Separate filtered masks combine conservatively by minimum, consistent with SSCS;
 this is not exact correlated PCF union. The ambient field approximates sky
@@ -47,8 +49,12 @@ godot --path hlod_addon --rendering-method forward_plus -s res://tests/run_outdo
 ```
 
 The shader check compiles the actual sampler and reconstruction functions in
-vertex/fragment/compute stages. Its negative control removes the actual header
+vertex/fragment/compute stages, including the actual native call sites and packed
+mat3x4 camera context. Its negative control removes the actual header
 field and must fail all three stages. `run_outdoor_baked_tests.gd` checks native
 binding, radiance/cosine interpolation, moving-receiver occlusion, fine/coarse
 fallback, sunrise weighting, environment ownership and disabling. Run the existing
 baked-direct and context fixtures as well; these tests do not establish FPS.
+`--negative-context-control` deliberately restores the invalid packed-camera
+multiplication and must reject all three stages. This guards the first rendered
+candidate's compilation failure before another engine rebuild.

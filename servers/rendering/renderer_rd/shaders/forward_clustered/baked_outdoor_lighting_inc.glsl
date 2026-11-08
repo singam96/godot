@@ -21,6 +21,17 @@ bool baked_outdoor_sun(uint light_idx) {
 	return outdoor_lighting.info.x != 0u && outdoor_lighting.info.y == light_idx;
 }
 
+bool baked_outdoor_ambient_receiver(uint instance_idx) {
+#if defined(CUSTOM_IRRADIANCE_USED) || defined(AMBIENT_LIGHT_DISABLED)
+	return false;
+#else
+	uint gi_flags = INSTANCE_FLAGS_USE_LIGHTMAP | INSTANCE_FLAGS_USE_LIGHTMAP_CAPTURE | INSTANCE_FLAGS_USE_VOXEL_GI | INSTANCE_FLAGS_USE_SDFGI | INSTANCE_FLAGS_USE_GI_BUFFERS;
+	return outdoor_lighting.info.x != 0u &&
+			(instances.data[instance_idx].layer_mask & (outdoor_lighting.info.z | outdoor_lighting.info.w)) != 0u &&
+			(instances.data[instance_idx].flags & gi_flags) == 0u;
+#endif
+}
+
 float baked_outdoor_depth_compare(texture2DArray depth, vec2 uv, int layer, float reference) {
 	ivec3 size = textureSize(sampler2DArray(depth, SAMPLER_NEAREST_CLAMP), 0);
 	if (layer < 0 || layer >= size.z) {

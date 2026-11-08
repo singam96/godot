@@ -2022,6 +2022,12 @@ void fragment_shader(in SceneData scene_data) {
 		}
 	}
 #endif // USE_LIGHTMAP
+	if (baked_outdoor_ambient_receiver(instance_index)) {
+		vec3 world_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+		float blend = clamp(outdoor_lighting.parameters[14].x, 0.0, 1.0);
+		ambient_light = mix(outdoor_lighting.parameters[8].rgb, outdoor_lighting.parameters[9].rgb, blend) * outdoor_lighting.parameters[17].rgb;
+		ambient_light *= baked_outdoor_sky_visibility(world_position) * scene_data.emissive_exposure_normalization;
+	}
 #if defined(CUSTOM_IRRADIANCE_USED)
 	ambient_light = mix(ambient_light, custom_irradiance.rgb, custom_irradiance.a);
 #endif
@@ -2533,12 +2539,6 @@ void fragment_shader(in SceneData scene_data) {
 		}
 	}
 #endif // USE_LIGHTMAP
-	if (baked_outdoor_receiver(instance_index)) {
-		vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
-		float blend = clamp(outdoor_lighting.parameters[14].x, 0.0, 1.0);
-		ambient_light = mix(outdoor_lighting.parameters[8].rgb, outdoor_lighting.parameters[9].rgb, blend) * outdoor_lighting.parameters[17].rgb;
-		ambient_light *= baked_outdoor_sky_visibility(world_position) * scene_data.emissive_exposure_normalization;
-	}
 	{
 #ifdef MULTI_BOUNCE_OCCLUSION_ENABLED
 		// Apply multi-bounce ambient-occlusion approximation to ambient light:
@@ -2769,8 +2769,8 @@ void fragment_shader(in SceneData scene_data) {
 						scene_data.taa_frame_count, scene_data.directional_shadow_pixel_size, vertex_shadow);
 #ifdef USE_VERTEX_LIGHTING
 				if (baked_outdoor_sun(i) && !baked_outdoor_receiver(instance_index)) {
-					vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
-					vec3 world_normal = mat3(scene_data.inv_view_matrix) * geo_normal;
+					vec3 world_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+					vec3 world_normal = mat3(inv_view_matrix) * geo_normal;
 					vertex_shadow = min(vertex_shadow, mix(1.0, baked_outdoor_actor_visibility(world_position, world_normal), clamp(outdoor_lighting.parameters[17].w, 0.0, 1.0)));
 				}
 				if (directional_lights.data[i].shadow_opacity > 0.001 || baked_outdoor_sun(i)) {
@@ -2803,9 +2803,9 @@ void fragment_shader(in SceneData scene_data) {
 	if (baked_outdoor_receiver(instance_index) && outdoor_lighting.info.y < scene_data.directional_light_count) {
 		uint sun_index = outdoor_lighting.info.y;
 		if (bool(directional_lights.data[sun_index].mask & instances.data[instance_index].layer_mask)) {
-			vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
-			vec3 world_normal = normalize(mat3(scene_data.inv_view_matrix) * normal);
-			vec3 world_geo_normal = mat3(scene_data.inv_view_matrix) * geo_normal;
+			vec3 world_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+			vec3 world_normal = normalize(mat3(inv_view_matrix) * normal);
+			vec3 world_geo_normal = mat3(inv_view_matrix) * geo_normal;
 			float moving_shadow = 1.0;
 #ifndef SHADOWS_DISABLED
 			moving_shadow = sun_index < 4u ? float((shadow0 >> (sun_index * 8u)) & 255u) / 255.0 : float((shadow1 >> ((sun_index - 4u) * 8u)) & 255u) / 255.0;
@@ -2897,8 +2897,8 @@ void fragment_shader(in SceneData scene_data) {
 
 			shadow = mix(1.0, shadow, directional_lights.data[i].shadow_opacity);
 			if (baked_outdoor_sun(i)) {
-				vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
-				vec3 world_normal = mat3(scene_data.inv_view_matrix) * geo_normal;
+				vec3 world_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+				vec3 world_normal = mat3(inv_view_matrix) * geo_normal;
 				shadow = min(shadow, mix(1.0, baked_outdoor_actor_visibility(world_position, world_normal), clamp(outdoor_lighting.parameters[17].w, 0.0, 1.0)));
 			}
 #endif
