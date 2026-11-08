@@ -67,3 +67,7 @@ Rendered acceptance on 0c7a72d: 27 checks cover static/actor sampled visibility,
 per-sample normals, coarse/fine fallbacks, disabled live shadows, environment
 ownership, sky fields and live moving-only shadows. Existing lamp/home shadow
 fixture: 39 checks; bake context: 13 checks. All pass without shader diagnostics.
+
+Receiver-plane depth correction is applied to each comparison tap, including
+the fine-page coordinate scale. A sloped-depth fixture fails on 0c7a72d without
+this correction; increasing a global normal offset is not used to hide it.

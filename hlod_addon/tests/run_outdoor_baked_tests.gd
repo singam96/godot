@@ -224,6 +224,21 @@ func _run() -> void:
 	var sky_fallback := await _image()
 	_check(absf(_value(sky_fallback, Vector3.ZERO) - 0.025) < 0.015, "unready fine sky storage preserves valid coarse visibility")
 	parameters = initial_parameters.duplicate()
+	var slope_projection := Projection(Vector4(0.125, 0, 0, 0), Vector4(0, 0, 0.1, 0), Vector4(0, 0.125, 0.05, 0), Vector4(0.5, 0.5, 0.3, 1))
+	for sample_index in 2:
+		var columns := [slope_projection.x, slope_projection.y, slope_projection.z, slope_projection.w]
+		for column in 4:
+			for component in 4: parameters[sample_index * 16 + column * 4 + component] = columns[column][component]
+	var slope_image := Image.create(32, 32, false, Image.FORMAT_RF)
+	for row in 32:
+		for column in 32: slope_image.set_pixel(column, row, Color(0.1 + 0.4 * (row + 0.5) / 32.0, 0, 0))
+	var slope_maps := _array([slope_image])
+	textures = [slope_maps.get_rid(), fine.get_rid()]
+	sun.light_energy = 0.4
+	_bind_cache_pages(PackedInt32Array([-1, -1]))
+	var slope_receiver := await _image()
+	_check(absf(_value(slope_receiver, Vector3.ZERO) - original) < 0.025, "receiver-plane filtering does not self-shadow an open sloped depth field")
+	parameters = initial_parameters.duplicate()
 	textures = [maps.get_rid(), fine.get_rid()]
 	sun.light_energy = 0.4
 	sun.shadow_enabled = true

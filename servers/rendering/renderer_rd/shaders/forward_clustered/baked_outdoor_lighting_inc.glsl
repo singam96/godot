@@ -32,7 +32,7 @@ bool baked_outdoor_ambient_receiver(uint instance_idx) {
 #endif
 }
 
-float baked_outdoor_depth_compare(texture2DArray depth, vec2 uv, int layer, float reference) {
+float baked_outdoor_depth_compare(texture2DArray depth, vec2 uv, int layer, float reference, vec2 receiver_gradient) {
 	ivec3 size = textureSize(sampler2DArray(depth, SAMPLER_NEAREST_CLAMP), 0);
 	if (layer < 0 || layer >= size.z) {
 		return 1.0;
@@ -44,7 +44,9 @@ float baked_outdoor_depth_compare(texture2DArray depth, vec2 uv, int layer, floa
 	for (int tap = 0; tap < 4; tap++) {
 		ivec2 at = clamp(first + ivec2(tap & 1, tap >> 1), ivec2(0), size.xy - 1);
 		float stored = texelFetch(sampler2DArray(depth, SAMPLER_NEAREST_CLAMP), ivec3(at, layer), 0).r;
-		visibility[tap] = reference >= stored ? 1.0 : 0.0;
+		vec2 tap_uv = (vec2(at) + 0.5) / vec2(size.xy);
+		float receiver_depth = reference + dot(tap_uv - uv, receiver_gradient);
+		visibility[tap] = receiver_depth >= stored ? 1.0 : 0.0;
 	}
 	return mix(mix(visibility.x, visibility.y, weight.x), mix(visibility.z, visibility.w, weight.x), weight.y);
 }
@@ -52,6 +54,10 @@ float baked_outdoor_depth_compare(texture2DArray depth, vec2 uv, int layer, floa
 float baked_outdoor_visibility(int sample_idx, vec3 world_position, vec3 world_normal) {
 	int matrix_offset = sample_idx * 4;
 	mat4 to_map = mat4(outdoor_lighting.parameters[matrix_offset], outdoor_lighting.parameters[matrix_offset + 1], outdoor_lighting.parameters[matrix_offset + 2], outdoor_lighting.parameters[matrix_offset + 3]);
+	// Compare each tap at the receiver plane, rather than shifting an entire
+	// surface far from its contact shadow to hide sloped-depth self-occlusion.
+	vec3 plane_normal = transpose(inverse(mat3(to_map))) * world_normal;
+	vec2 receiver_gradient = abs(plane_normal.z) > 0.00001 ? -plane_normal.xy / plane_normal.z : vec2(0.0);
 	vec3 biased = world_position + world_normal * outdoor_lighting.parameters[12 + sample_idx].w;
 	vec3 point = (to_map * vec4(biased, 1.0)).xyz;
 	if (any(lessThan(point, vec3(0.0))) || any(greaterThanEqual(point, vec3(1.0)))) {
@@ -67,9 +73,9 @@ float baked_outdoor_visibility(int sample_idx, vec3 world_position, vec3 world_n
 	if (page >= 0 && page < textureSize(sampler2DArray(outdoor_fine_depth, SAMPLER_NEAREST_CLAMP), 0).z) {
 		float border = outdoor_lighting.parameters[14].w;
 		vec2 uv = fract(tile_position) * (1.0 - 2.0 * border) + border;
-		return baked_outdoor_depth_compare(outdoor_fine_depth, uv, page, reference);
+		return baked_outdoor_depth_compare(outdoor_fine_depth, uv, page, reference, receiver_gradient / (vec2(grid) * (1.0 - 2.0 * border)));
 	}
-	return baked_outdoor_depth_compare(outdoor_coarse_depth, point.xy, int(outdoor_lighting.parameters[10 + sample_idx].w), reference);
+	return baked_outdoor_depth_compare(outdoor_coarse_depth, point.xy, int(outdoor_lighting.parameters[10 + sample_idx].w), reference, receiver_gradient);
 }
 
 float baked_outdoor_actor_visibility(vec3 world_position, vec3 world_normal) {
