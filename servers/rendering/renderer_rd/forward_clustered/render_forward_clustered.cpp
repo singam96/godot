@@ -4073,6 +4073,12 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 			texture.append_id(textures[i]);
 			uniforms.push_back(texture);
 		}
+		if (OS::get_singleton()->has_environment("GODOT_OUTDOOR_DIAGNOSTIC") && p_render_data && data) {
+			static int diagnostic_count = 0;
+			if (diagnostic_count++ < 8) {
+				print_line(vformat("OUTDOOR_BIND data=%s coarse=%s fine=%s sun=%d params=%d receiver=%d buffer=%d", data != nullptr, available[0], available[1], light_storage->light_get_directional_index(data->sun), data->parameters.size(), data->receiver_mask, p_uniform_buffer_index));
+			}
+		}
 		if (data && available[0]) {
 			uint32_t *info = reinterpret_cast<uint32_t *>(bytes.ptrw());
 			info[0] = 1;

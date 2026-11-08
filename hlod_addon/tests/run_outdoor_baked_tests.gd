@@ -49,7 +49,9 @@ func _image() -> Image:
 func _value(image: Image, point: Vector3) -> float:
 	var at := Vector2i(camera.unproject_position(point))
 	var color := image.get_pixelv(at).srgb_to_linear()
-	return (color.r + color.g + color.b) / 3.0
+	var value := (color.r + color.g + color.b) / 3.0
+	print("OUTDOOR_PIXEL point=", point, " value=", value)
+	return value
 
 
 func _plane(parent: Node, at: Vector3, layers: int) -> MeshInstance3D:
@@ -126,6 +128,13 @@ func _run() -> void:
 	var original := _value(reference, Vector3.ZERO)
 	_bind_cache_pages(PackedInt32Array([-1, -1]))
 	var open := await _image()
+	RenderingServer.call_on_render_thread(func():
+		var rd := RenderingServer.get_rendering_device()
+		for texture in textures:
+			var rid := RenderingServer.texture_get_rd_texture(texture)
+			var format := rd.texture_get_format(rid)
+			print("OUTDOOR_TEXTURE type=", format.texture_type, " layers=", format.array_layers, " usage=", format.usage_bits)
+	)
 	_check(absf(_value(open, Vector3.ZERO) - original) < 0.025, "cached radiance replaces ordinary sun once")
 	_check(absf(_value(open, actor.position) - _value(reference, actor.position)) < 0.025, "unmapped actor retains ordinary lighting")
 	parameters[56] = 1.0

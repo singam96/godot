@@ -88,6 +88,7 @@ void RendererEnvironmentStorage::environment_set_baked_outdoor_lighting(RID p_en
 	}
 	BakedOutdoorLighting &data = env->baked_outdoor_lighting;
 	data.sun = p_sun;
+	if (OS::get_singleton()->has_environment("GODOT_OUTDOOR_DIAGNOSTIC")) { print_line("OUTDOOR_SET_RECEIVED"); }
 	data.textures = p_textures.duplicate(); // Snapshot the caller's mutable Array.
 	data.parameters = p_parameters;
 	data.pages = p_pages;
