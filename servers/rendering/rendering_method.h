@@ -32,6 +32,7 @@
 
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
+#include "core/variant/typed_array.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
 
@@ -169,6 +170,7 @@ public:
 
 	// Background
 	virtual void environment_set_background(RID p_env, RSE::EnvironmentBG p_bg) = 0;
+	virtual void environment_set_baked_outdoor_lighting(RID p_env, RID p_sun, const TypedArray<RID> &p_textures, const Vector<float> &p_parameters, const Vector<int32_t> &p_pages, uint32_t p_receiver_mask, uint32_t p_moving_mask) = 0;
 	virtual void environment_set_sky(RID p_env, RID p_sky) = 0;
 	virtual void environment_set_sky_custom_fov(RID p_env, float p_scale) = 0;
 	virtual void environment_set_sky_orientation(RID p_env, const Basis &p_orientation) = 0;

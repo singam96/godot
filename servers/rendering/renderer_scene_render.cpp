@@ -150,6 +150,10 @@ void RendererSceneRender::environment_set_background(RID p_env, RSE::Environment
 	environment_storage.environment_set_background(p_env, p_bg);
 }
 
+void RendererSceneRender::environment_set_baked_outdoor_lighting(RID p_env, RID p_sun, const TypedArray<RID> &p_textures, const Vector<float> &p_parameters, const Vector<int32_t> &p_pages, uint32_t p_receiver_mask, uint32_t p_moving_mask) {
+	environment_storage.environment_set_baked_outdoor_lighting(p_env, p_sun, p_textures, p_parameters, p_pages, p_receiver_mask, p_moving_mask);
+}
+
 void RendererSceneRender::environment_set_sky(RID p_env, RID p_sky) {
 	environment_storage.environment_set_sky(p_env, p_sky);
 }

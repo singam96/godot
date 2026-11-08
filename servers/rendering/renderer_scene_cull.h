@@ -1250,6 +1250,7 @@ public:
 
 	// Background
 	PASS2(environment_set_background, RID, RSE::EnvironmentBG)
+	PASS7(environment_set_baked_outdoor_lighting, RID, RID, const TypedArray<RID> &, const Vector<float> &, const Vector<int32_t> &, uint32_t, uint32_t)
 	PASS2(environment_set_sky, RID, RID)
 	PASS2(environment_set_sky_custom_fov, RID, float)
 	PASS2(environment_set_sky_orientation, RID, const Basis &)

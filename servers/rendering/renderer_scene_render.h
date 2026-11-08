@@ -113,6 +113,7 @@ public:
 
 	// Background
 	void environment_set_background(RID p_env, RSE::EnvironmentBG p_bg);
+	void environment_set_baked_outdoor_lighting(RID p_env, RID p_sun, const TypedArray<RID> &p_textures, const Vector<float> &p_parameters, const Vector<int32_t> &p_pages, uint32_t p_receiver_mask, uint32_t p_moving_mask);
 	void environment_set_sky(RID p_env, RID p_sky);
 	void environment_set_sky_custom_fov(RID p_env, float p_scale);
 	void environment_set_sky_orientation(RID p_env, const Basis &p_orientation);
