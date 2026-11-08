@@ -859,6 +859,7 @@ public:
 	FUNCRIDSPLIT(environment)
 
 	FUNC2(environment_set_background, RID, RSE::EnvironmentBG)
+	FUNC7(environment_set_baked_outdoor_lighting, RID, RID, const TypedArray<RID> &, const Vector<float> &, const Vector<int32_t> &, uint32_t, uint32_t)
 	FUNC2(environment_set_sky, RID, RID)
 	FUNC2(environment_set_sky_custom_fov, RID, float)
 	FUNC2(environment_set_sky_orientation, RID, const Basis &)

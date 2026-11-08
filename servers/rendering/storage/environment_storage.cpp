@@ -62,6 +62,44 @@ void RendererEnvironmentStorage::environment_free(RID p_rid) {
 
 // Background
 
+void RendererEnvironmentStorage::environment_set_baked_outdoor_lighting(RID p_env, RID p_sun, const TypedArray<RID> &p_textures, const Vector<float> &p_parameters, const Vector<int32_t> &p_pages, uint32_t p_receiver_mask, uint32_t p_moving_mask) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	if (p_sun.is_null()) {
+		env->baked_outdoor_lighting = BakedOutdoorLighting();
+		return;
+	}
+	ERR_FAIL_COND_MSG(p_textures.size() < 2 || p_textures.size() > 4, "Outdoor lighting needs coarse/fine depth textures and optional coarse/fine ambient fields.");
+	ERR_FAIL_COND_MSG(p_parameters.size() != BakedOutdoorLighting::PARAMETER_FLOATS, "Invalid baked outdoor lighting parameter layout.");
+	ERR_FAIL_COND_MSG(p_pages.size() > BakedOutdoorLighting::PAGE_ENTRIES, "Outdoor lighting page table exceeds the bounded layout.");
+	for (float value : p_parameters) {
+		ERR_FAIL_COND_MSG(!Math::is_finite(value), "Outdoor lighting parameters must be finite.");
+	}
+	for (int i = 60; i < 64; i++) {
+		ERR_FAIL_COND_MSG(p_parameters[i] < 1 || p_parameters[i] > 32 || p_parameters[i] != Math::floor(p_parameters[i]), "Outdoor sun page grids must have 1 through 32 cells per side.");
+	}
+	ERR_FAIL_COND_MSG(p_parameters[59] < 0 || p_parameters[59] >= 0.25, "Outdoor sun tile borders must be in [0, 0.25).");
+	if (p_parameters[78] >= 0.5) {
+		ERR_FAIL_COND_MSG(p_textures.size() != 4 || p_parameters[74] <= 0 || p_parameters[75] <= 0, "Outdoor ambient fields require valid textures and a positive world rectangle.");
+		for (int i = 76; i < 78; i++) {
+			ERR_FAIL_COND_MSG(p_parameters[i] < 1 || p_parameters[i] > 32 || p_parameters[i] != Math::floor(p_parameters[i]), "Outdoor ambient grids must have 1 through 32 cells per side.");
+		}
+		ERR_FAIL_COND_MSG(p_parameters[79] < 0 || p_parameters[79] >= 0.25, "Outdoor ambient tile borders must be in [0, 0.25).");
+	}
+	BakedOutdoorLighting &data = env->baked_outdoor_lighting;
+	data.sun = p_sun;
+	data.textures = p_textures;
+	data.parameters = p_parameters;
+	data.pages = p_pages;
+	data.receiver_mask = p_receiver_mask;
+	data.moving_mask = p_moving_mask;
+}
+
+const RendererEnvironmentStorage::BakedOutdoorLighting *RendererEnvironmentStorage::environment_get_baked_outdoor_lighting(RID p_env) const {
+	const Environment *env = environment_owner.get_or_null(p_env);
+	return env && env->baked_outdoor_lighting.sun.is_valid() ? &env->baked_outdoor_lighting : nullptr;
+}
+
 void RendererEnvironmentStorage::environment_set_background(RID p_env, RSE::EnvironmentBG p_bg) {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL(env);

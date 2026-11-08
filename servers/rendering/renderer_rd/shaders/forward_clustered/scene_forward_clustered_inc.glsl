@@ -526,6 +526,8 @@ layout(set = 1, binding = 38, std430) buffer restrict MaterialFeedbackBuffer {
 material_feedback;
 #endif
 
+#include "baked_outdoor_lighting_inc.glsl"
+
 /* Set 2 Skeleton & Instancing (can change per item) */
 
 layout(set = 2, binding = 0, std430) restrict readonly buffer Transforms {

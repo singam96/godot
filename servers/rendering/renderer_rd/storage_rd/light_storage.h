@@ -1061,6 +1061,7 @@ public:
 	virtual void lightmap_set_specular_intensity(RID p_lightmap, float p_intensity) override;
 	virtual void lightmap_set_baked_sun_shadow_layers(RID p_lightmap, RID p_sun, int p_first_layer_offset, int p_second_layer_offset) override;
 	Vector3 lightmap_get_baked_sun_shadow_layers(RID p_lightmap) const;
+	int light_get_directional_index(RID p_light) const;
 
 	virtual float lightmap_get_probe_capture_update_speed() const override {
 		return lightmap_probe_capture_update_speed;

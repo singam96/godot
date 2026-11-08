@@ -4037,6 +4037,60 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 	}
 #endif // MODULE_TEXTURE_STREAMING_ENABLED
 
+	// Per-pass storage keeps different environments/viewports independent. Texture
+	// pages are persistent; this only updates their small metadata and page table.
+	{
+		using Outdoor = RendererEnvironmentStorage::BakedOutdoorLighting;
+		while (scene_state.outdoor_lighting_buffers.size() <= p_uniform_buffer_index) {
+			scene_state.outdoor_lighting_buffers.push_back(RD::get_singleton()->storage_buffer_create(Outdoor::BUFFER_BYTES));
+		}
+		Vector<uint8_t> bytes;
+		bytes.resize(Outdoor::BUFFER_BYTES);
+		memset(bytes.ptrw(), 0, 16 + Outdoor::PARAMETER_FLOATS * 4);
+		memset(bytes.ptrw() + 16 + Outdoor::PARAMETER_FLOATS * 4, 0xFF, Outdoor::PAGE_ENTRIES * 4);
+		const Outdoor *data = p_render_data ? RendererEnvironmentStorage::get_singleton()->environment_get_baked_outdoor_lighting(p_render_data->environment) : nullptr;
+		RID textures[4];
+		bool depth_available[2] = {};
+		for (int i = 0; i < 4; i++) {
+			textures[i] = texture_storage->texture_rd_get_default(i == 2 ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE);
+			if (data && i < data->textures.size()) {
+				RID source = data->textures[i];
+				if (source.is_valid() && texture_storage->owns_texture(source)) {
+					RID rd_texture = texture_storage->texture_get_rd_texture(source);
+					if (rd_texture.is_valid()) {
+						textures[i] = rd_texture;
+						if (i < 2) {
+							depth_available[i] = true;
+						}
+					}
+				}
+			}
+			RD::Uniform texture;
+			texture.binding = 39 + i;
+			texture.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+			texture.append_id(textures[i]);
+			uniforms.push_back(texture);
+		}
+		if (data && depth_available[0] && depth_available[1]) {
+			uint32_t *info = reinterpret_cast<uint32_t *>(bytes.ptrw());
+			info[0] = 1;
+			info[1] = light_storage->light_get_directional_index(data->sun);
+			info[2] = data->receiver_mask;
+			info[3] = data->moving_mask;
+			memcpy(bytes.ptrw() + 16, data->parameters.ptr(), Outdoor::PARAMETER_FLOATS * 4);
+			if (!data->pages.is_empty()) {
+				memcpy(bytes.ptrw() + 16 + Outdoor::PARAMETER_FLOATS * 4, data->pages.ptr(), data->pages.size() * 4);
+			}
+		}
+		RID buffer = scene_state.outdoor_lighting_buffers[p_uniform_buffer_index];
+		RD::get_singleton()->buffer_update(buffer, 0, bytes.size(), bytes.ptr());
+		RD::Uniform uniform;
+		uniform.binding = 43;
+		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		uniform.append_id(buffer);
+		uniforms.push_back(uniform);
+	}
+
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
 }
 
@@ -4259,6 +4313,27 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 		ERR_FAIL_COND_V(scene_shader.default_shader_sdfgi_rd.is_null(), RID());
 	}
 
+	// SDF/material captures must not inherit a previous viewport's outdoor cache.
+	if (scene_state.outdoor_lighting_disabled_buffer.is_null()) {
+		Vector<uint8_t> zeroes;
+		zeroes.resize(RendererEnvironmentStorage::BakedOutdoorLighting::BUFFER_BYTES);
+		zeroes.fill(0);
+		scene_state.outdoor_lighting_disabled_buffer = RD::get_singleton()->storage_buffer_create(zeroes.size(), zeroes);
+	}
+	for (int i = 0; i < 4; i++) {
+		RD::Uniform uniform;
+		uniform.binding = 39 + i;
+		uniform.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		uniform.append_id(texture_storage->texture_rd_get_default(i == 2 ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE));
+		uniforms.push_back(uniform);
+	}
+	{
+		RD::Uniform uniform;
+		uniform.binding = 43;
+		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		uniform.append_id(scene_state.outdoor_lighting_disabled_buffer);
+		uniforms.push_back(uniform);
+	}
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.default_shader_sdfgi_rd, RENDER_PASS_UNIFORM_SET, uniforms);
 }
 
@@ -5600,6 +5675,12 @@ RenderForwardClustered::~RenderForwardClustered() {
 		}
 		for (const RID &rid : scene_state.implementation_uniform_buffers) {
 			RD::get_singleton()->free_rid(rid);
+		}
+		for (const RID &rid : scene_state.outdoor_lighting_buffers) {
+			RD::get_singleton()->free_rid(rid);
+		}
+		if (scene_state.outdoor_lighting_disabled_buffer.is_valid()) {
+			RD::get_singleton()->free_rid(scene_state.outdoor_lighting_disabled_buffer);
 		}
 		RD::get_singleton()->free_rid(scene_state.lightmap_buffer);
 		RD::get_singleton()->free_rid(scene_state.lightmap_capture_buffer);

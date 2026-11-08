@@ -2413,6 +2413,15 @@ Vector3 LightStorage::lightmap_get_baked_sun_shadow_layers(RID p_lightmap) const
 	return Vector3(-1, -1, -1);
 }
 
+int LightStorage::light_get_directional_index(RID p_light) const {
+	for (uint32_t i = 0; i < directional_light_ids.size(); i++) {
+		if (directional_light_ids[i] == p_light) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 /* LIGHTMAP INSTANCE */
 
 RID LightStorage::lightmap_instance_create(RID p_lightmap) {

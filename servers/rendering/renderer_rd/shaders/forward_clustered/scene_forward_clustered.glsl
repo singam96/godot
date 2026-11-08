@@ -628,6 +628,9 @@ void vertex_shader(vec3 vertex_input,
 		vec3 directional_specular = vec3(0.0);
 
 		for (uint i = 0; i < scene_data.directional_light_count; i++) {
+			if (baked_outdoor_sun(i) && baked_outdoor_receiver(instance_index)) {
+				continue; // Reconstructed from baked directional irradiance in fragment.
+			}
 			if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask) || directional_lights.data[i].energy == 0.0) {
 				continue; // Not masked or zero energy.
 			}
@@ -2530,6 +2533,12 @@ void fragment_shader(in SceneData scene_data) {
 		}
 	}
 #endif // USE_LIGHTMAP
+	if (baked_outdoor_receiver(instance_index)) {
+		vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
+		float blend = clamp(outdoor_lighting.parameters[14].x, 0.0, 1.0);
+		ambient_light = mix(outdoor_lighting.parameters[8].rgb, outdoor_lighting.parameters[9].rgb, blend) * outdoor_lighting.parameters[17].rgb;
+		ambient_light *= baked_outdoor_sky_visibility(world_position) * scene_data.emissive_exposure_normalization;
+	}
 	{
 #ifdef MULTI_BOUNCE_OCCLUSION_ENABLED
 		// Apply multi-bounce ambient-occlusion approximation to ambient light:
@@ -2759,7 +2768,12 @@ void fragment_shader(in SceneData scene_data) {
 						,
 						scene_data.taa_frame_count, scene_data.directional_shadow_pixel_size, vertex_shadow);
 #ifdef USE_VERTEX_LIGHTING
-				if (directional_lights.data[i].shadow_opacity > 0.001) {
+				if (baked_outdoor_sun(i) && !baked_outdoor_receiver(instance_index)) {
+					vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
+					vec3 world_normal = mat3(scene_data.inv_view_matrix) * geo_normal;
+					vertex_shadow = min(vertex_shadow, mix(1.0, baked_outdoor_actor_visibility(world_position, world_normal), clamp(outdoor_lighting.parameters[17].w, 0.0, 1.0)));
+				}
+				if (directional_lights.data[i].shadow_opacity > 0.001 || baked_outdoor_sun(i)) {
 					diffuse_light *= mix(1.0, vertex_shadow, diffuse_light_interp.a);
 					direct_specular_light *= mix(1.0, vertex_shadow, specular_light_interp.a);
 				}
@@ -2786,6 +2800,20 @@ void fragment_shader(in SceneData scene_data) {
 
 #endif // SHADOWS_DISABLED
 
+	if (baked_outdoor_receiver(instance_index) && outdoor_lighting.info.y < scene_data.directional_light_count) {
+		uint sun_index = outdoor_lighting.info.y;
+		if (bool(directional_lights.data[sun_index].mask & instances.data[instance_index].layer_mask)) {
+			vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
+			vec3 world_normal = normalize(mat3(scene_data.inv_view_matrix) * normal);
+			vec3 world_geo_normal = mat3(scene_data.inv_view_matrix) * geo_normal;
+			float moving_shadow = 1.0;
+#ifndef SHADOWS_DISABLED
+			moving_shadow = sun_index < 4u ? float((shadow0 >> (sun_index * 8u)) & 255u) / 255.0 : float((shadow1 >> ((sun_index - 4u) * 8u)) & 255u) / 255.0;
+#endif
+			diffuse_light += baked_outdoor_solar_irradiance(world_position, world_normal, world_geo_normal, moving_shadow, directional_lights.data[sun_index].shadow_opacity) * scene_data.emissive_exposure_normalization;
+		}
+	}
+
 #ifndef USE_VERTEX_LIGHTING
 
 		for (uint i = 0; i < 8; i++) {
@@ -2793,6 +2821,9 @@ void fragment_shader(in SceneData scene_data) {
 				break;
 			}
 
+			if (baked_outdoor_sun(i) && baked_outdoor_receiver(instance_index)) {
+				continue; // Cached irradiance was applied once, outside the live BRDF loop.
+			}
 			if (!bool(directional_lights.data[i].mask & instances.data[instance_index].layer_mask) || directional_lights.data[i].energy == 0.0) {
 				continue; // Not masked or zero energy.
 			}
@@ -2865,6 +2896,11 @@ void fragment_shader(in SceneData scene_data) {
 			}
 
 			shadow = mix(1.0, shadow, directional_lights.data[i].shadow_opacity);
+			if (baked_outdoor_sun(i)) {
+				vec3 world_position = (scene_data.inv_view_matrix * vec4(vertex, 1.0)).xyz;
+				vec3 world_normal = mat3(scene_data.inv_view_matrix) * geo_normal;
+				shadow = min(shadow, mix(1.0, baked_outdoor_actor_visibility(world_position, world_normal), clamp(outdoor_lighting.parameters[17].w, 0.0, 1.0)));
+			}
 #endif
 
 			blur_shadow(shadow);

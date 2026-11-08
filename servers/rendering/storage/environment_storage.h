@@ -31,10 +31,24 @@
 #pragma once
 
 #include "core/templates/rid_owner.h"
+#include "core/variant/typed_array.h"
 #include "servers/rendering/rendering_server_enums.h"
 
 class RendererEnvironmentStorage {
 public:
+	// Opt-in streamed outdoor irradiance. The host owns the immutable textures;
+	// only metadata/pages change during playback. Kept renderer-independent here.
+	struct BakedOutdoorLighting {
+		static constexpr uint32_t PARAMETER_FLOATS = 80;
+		static constexpr uint32_t PAGE_ENTRIES = 3072;
+		static constexpr uint32_t BUFFER_BYTES = 16 + PARAMETER_FLOATS * 4 + PAGE_ENTRIES * 4;
+		RID sun;
+		TypedArray<RID> textures;
+		Vector<float> parameters;
+		Vector<int32_t> pages;
+		uint32_t receiver_mask = 0;
+		uint32_t moving_mask = 0;
+	};
 	union TonemapParameters {
 		// Shader vec4:
 		float tonemapper_params[4];
@@ -63,6 +77,7 @@ private:
 
 	// Environment
 	struct Environment {
+		BakedOutdoorLighting baked_outdoor_lighting;
 		// Note, we capture and store all environment parameters received from Godot here.
 		// Not all renderers support all effects and should just ignore the bits they don't support.
 
@@ -193,6 +208,8 @@ public:
 	RID environment_allocate();
 	void environment_initialize(RID p_rid);
 	void environment_free(RID p_rid);
+	void environment_set_baked_outdoor_lighting(RID p_env, RID p_sun, const TypedArray<RID> &p_textures, const Vector<float> &p_parameters, const Vector<int32_t> &p_pages, uint32_t p_receiver_mask, uint32_t p_moving_mask);
+	const BakedOutdoorLighting *environment_get_baked_outdoor_lighting(RID p_env) const;
 
 	bool is_environment(RID p_environment) const {
 		return environment_owner.owns(p_environment);

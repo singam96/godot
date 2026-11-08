@@ -3077,6 +3077,7 @@ void RenderingServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("environment_create"), &RenderingServer::environment_create);
 	ClassDB::bind_method(D_METHOD("environment_set_background", "env", "bg"), &RenderingServer::environment_set_background);
+	ClassDB::bind_method(D_METHOD("environment_set_baked_outdoor_lighting", "env", "sun", "textures", "parameters", "pages", "receiver_mask", "moving_mask"), &RenderingServer::environment_set_baked_outdoor_lighting);
 	ClassDB::bind_method(D_METHOD("environment_set_camera_id", "env", "id"), &RenderingServer::environment_set_camera_feed_id);
 	ClassDB::bind_method(D_METHOD("environment_set_sky", "env", "sky"), &RenderingServer::environment_set_sky);
 	ClassDB::bind_method(D_METHOD("environment_set_sky_custom_fov", "env", "scale"), &RenderingServer::environment_set_sky_custom_fov);

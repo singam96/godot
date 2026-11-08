@@ -415,6 +415,8 @@ private:
 
 		LocalVector<RID> uniform_buffers;
 		LocalVector<RID> implementation_uniform_buffers;
+		LocalVector<RID> outdoor_lighting_buffers;
+		RID outdoor_lighting_disabled_buffer;
 		uint32_t used_uniform_buffer_count = 0;
 
 		LightmapData lightmaps[MAX_LIGHTMAPS];
