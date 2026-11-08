@@ -30,6 +30,8 @@
 
 #include "render_forward_clustered.h"
 
+#include "core/os/os.h"
+
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/effects/multimesh_cull.h"
