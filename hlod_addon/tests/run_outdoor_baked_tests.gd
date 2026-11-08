@@ -123,6 +123,7 @@ func _run() -> void:
 		parameters[49 + sample_index * 4] = 1.0
 	for index in range(60, 67): parameters[index] = 1.0
 	for index in range(68, 72): parameters[index] = 1.0
+	var initial_parameters := parameters.duplicate()
 	var reference := await _image()
 	var original := _value(reference, Vector3.ZERO)
 	_bind_cache_pages(PackedInt32Array([-1, -1]))
@@ -222,7 +223,28 @@ func _run() -> void:
 	_bind_cache_pages(PackedInt32Array([-1, -1, 0]))
 	var sky_fallback := await _image()
 	_check(absf(_value(sky_fallback, Vector3.ZERO) - 0.025) < 0.015, "unready fine sky storage preserves valid coarse visibility")
+	parameters = initial_parameters.duplicate()
+	textures = [maps.get_rid(), fine.get_rid()]
 	sun.light_energy = 0.4
+	sun.shadow_enabled = true
+	_bind_cache_pages(PackedInt32Array([-1, -1]))
+	var moving := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(0.8, 1.0, 0.8)
+	moving.mesh = box
+	moving.position = Vector3(0, 2, 0)
+	moving.layers = 8
+	fixture.add_child(moving)
+	var moving_shadow := await _image()
+	_check(_value(moving_shadow, Vector3.ZERO) < original * 0.4, "moving-only live sun shadows cached static receivers")
+	moving.position.x = 3.5
+	var moved_away := await _image()
+	_check(absf(_value(moved_away, Vector3.ZERO) - original) < 0.025, "moving shadow updates without rebaking the cache")
+	moving.position.x = 0
+	moving.layers = 16
+	var fixed_mask := await _image()
+	_check(absf(_value(fixed_mask, Vector3.ZERO) - original) < 0.025, "fixed receiver layer cannot enter moving-only sun passes")
+	moving.queue_free()
 	RenderingServer.call(API, environment.get_rid(), RID(), [], PackedFloat32Array(), PackedInt32Array(), 0, 0)
 	var restored := await _image()
 	_check(absf(_value(restored, Vector3.ZERO) - original) < 0.025, "disabling restores the original path")

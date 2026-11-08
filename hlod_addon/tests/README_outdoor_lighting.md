@@ -62,3 +62,8 @@ candidate's compilation failure before another engine rebuild.
 Light3D initializes its visual instance directly and leaves the inherited
 VisualInstance3D base RID empty. Use the explicit get_light_rid() binding; an
 empty sun RID intentionally clears the environment cache.
+
+Rendered acceptance on 0c7a72d: 27 checks cover static/actor sampled visibility,
+per-sample normals, coarse/fine fallbacks, disabled live shadows, environment
+ownership, sky fields and live moving-only shadows. Existing lamp/home shadow
+fixture: 39 checks; bake context: 13 checks. All pass without shader diagnostics.
