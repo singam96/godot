@@ -471,7 +471,7 @@ bool get_property(const StringName &p_name, Variant &r_target, const GritFrame &
 bool set_property(const StringName &p_name, const Variant &p_value, const GritFrame &p_frame, int p_line);
 
 struct PropertyAccessor {
-	MethodBind *method = nullptr;
+	const MethodBind *method = nullptr;
 	StringName method_name;
 	int index = -1;
 	Variant::Type value_type = Variant::VARIANT_MAX;
@@ -731,14 +731,14 @@ public:
 	ResumedSlots(const ResumedSlots &) = delete;
 	ResumedSlots &operator=(const ResumedSlots &) = delete;
 };
-bool call_method_bind(MethodBind *p_method, const Variant &p_base, const Variant **p_args, int p_argcount, Variant *r_return, const GritFrame &p_frame, int p_line);
-bool call_method_bind_validated(MethodBind *p_method, const Variant &p_base, const Variant **p_args, Variant &r_return, const GritFrame &p_frame, int p_line);
-bool call_method_bind_pointer(MethodBind *p_method, const Variant &p_base, const void **p_args, void *r_return, const GritFrame &p_frame, int p_line);
+bool call_method_bind(const MethodBind *p_method, const Variant &p_base, const Variant **p_args, int p_argcount, Variant *r_return, const GritFrame &p_frame, int p_line);
+bool call_method_bind_validated(const MethodBind *p_method, const Variant &p_base, const Variant **p_args, Variant &r_return, const GritFrame &p_frame, int p_line);
+bool call_method_bind_pointer(const MethodBind *p_method, const Variant &p_base, const void **p_args, void *r_return, const GritFrame &p_frame, int p_line);
 bool call_utility(const StringName &p_function, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line);
 bool call_gdscript_utility(GDScriptUtilityFunctions::FunctionPtr p_function, const StringName &p_name, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line);
 bool call_builtin_static(Variant::Type p_type, const StringName &p_method, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line);
-bool call_native_static(MethodBind *p_method, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line);
-void call_native_static_validated(MethodBind *p_method, const Variant **p_args, Variant &r_return);
+bool call_native_static(const MethodBind *p_method, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line);
+void call_native_static_validated(const MethodBind *p_method, const Variant **p_args, Variant &r_return);
 bool call_super(const StringName &p_method, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line);
 
 bool check_assert(bool p_condition, const Variant &p_message, bool p_has_message, const GritFrame &p_frame, int p_line);

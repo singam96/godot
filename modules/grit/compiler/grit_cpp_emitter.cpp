@@ -819,7 +819,7 @@ bool GritCppEmitter::write_pointer_call(const GritStatement &p_statement, Scope 
 			if (!grit_is_pointer_type(return_type)) {
 				return false;
 			}
-			const String method_symbol = add_static("MethodBind *const", "method", "ClassDB::get_method(" + string_name(p_statement.class_name) + ", " + string_name(name) + ")");
+			const String method_symbol = add_static("const MethodBind *const", "method", "ClassDB::get_method(" + string_name(p_statement.class_name) + ", " + string_name(name) + ")");
 			r_scope.prelude.push_back("if (unlikely(!" + method_symbol + ")) { GritRuntime::report_error(frame, " + line + ", " + string_literal(vformat("Grit: method \"%s.%s\" is not available.", p_statement.class_name, name)) + "); " + error_return() + " }");
 			const String base = is_static ? String() : variant_value(p_statement.operands[0], r_scope);
 			const String arguments = pointer_arguments(p_statement, first, types, r_scope);
@@ -1861,7 +1861,7 @@ void GritCppEmitter::write_call(const GritStatement &p_statement) {
 		} break;
 		case GritOpcode::CALL_NATIVE_STATIC:
 		case GritOpcode::CALL_METHOD_BIND: {
-			const String method = add_static("MethodBind *const", "method", "ClassDB::get_method(" + string_name(p_statement.class_name) + ", " + string_name(p_statement.name) + ")");
+			const String method = add_static("const MethodBind *const", "method", "ClassDB::get_method(" + string_name(p_statement.class_name) + ", " + string_name(p_statement.name) + ")");
 			scope.prelude.push_back("if (unlikely(!" + method + ")) { GritRuntime::report_error(frame, " + line + ", " + string_literal(vformat("Grit: method \"%s.%s\" is not available.", p_statement.class_name, p_statement.name)) + "); " + error_return() + " }");
 			if (p_statement.opcode == GritOpcode::CALL_NATIVE_STATIC) {
 				const String arguments = arguments_array(p_statement, 0, scope);

@@ -21,10 +21,10 @@ static String script_display_name(const Ref<Script> &p_script) {
 }
 
 static String element_type_name(Variant::Type p_builtin_type, const StringName &p_native_type, const Ref<Script> &p_script_type) {
-	if (p_script_type.is_valid() && p_script_type->is_valid()) {
+	if (p_script_type.is_valid() && p_script_type->is_script_valid()) {
 		return script_display_name(p_script_type);
 	} else if (p_native_type != StringName()) {
-		return p_native_type.operator String();
+		return String(p_native_type);
 	}
 	return Variant::get_type_name(p_builtin_type);
 }
@@ -79,7 +79,7 @@ static bool script_inherits(const Object *p_object, const Script *p_script_type)
 	if (!p_object || !p_object->get_script_instance()) {
 		return false;
 	}
-	const Script *script = p_object->get_script_instance()->get_script().ptr();
+	const Script *script = p_object->get_script_instance()->get_script();
 	while (script) {
 		if (script == p_script_type) {
 			return true;
@@ -853,7 +853,7 @@ static bool overrides_object_call(const StringName &p_class) {
 	return ClassDB::is_parent_class(p_class, Script::get_class_static());
 }
 
-static void resolve_accessor(const StringName &p_class, const StringName &p_method_name, MethodBind *p_direct_method, int p_index, bool p_is_setter, PropertyAccessor &r_accessor) {
+static void resolve_accessor(const StringName &p_class, const StringName &p_method_name, const MethodBind *p_direct_method, int p_index, bool p_is_setter, PropertyAccessor &r_accessor) {
 	r_accessor.method_name = p_method_name;
 	r_accessor.index = p_index;
 	r_accessor.is_call = p_direct_method == nullptr;
@@ -887,30 +887,23 @@ static void resolve_accessor(const StringName &p_class, const StringName &p_meth
 }
 
 void resolve_property_accessors(const StringName &p_class, const StringName &p_name, PropertyAccessors &r_accessors) {
-	ClassDB::Locker::Lock lock(ClassDB::Locker::STATE_READ);
-	const ClassDB::ClassInfo *type = ClassDB::classes.getptr(p_class);
-
-	for (const ClassDB::ClassInfo *check = type; check; check = check->inherits_ptr) {
-		const ClassDB::PropertySetGet *property = check->property_setget.getptr(p_name);
-		if (property) {
-			if (property->getter != StringName()) {
-				resolve_accessor(p_class, property->getter, property->index < 0 ? property->_getptr : nullptr, property->index, false, r_accessors.getter);
-			}
-			break;
-		}
-		if (check->gdtype->get_integer_constant_map(true).has(p_name) || check->method_map.has(p_name) || check->gdtype->get_signal_map(true).has(p_name)) {
-			break;
-		}
+	const GDType *type = ClassDB::get_gdtype(p_class);
+	if (!type) {
+		return;
 	}
 
-	for (const ClassDB::ClassInfo *check = type; check; check = check->inherits_ptr) {
-		const ClassDB::PropertySetGet *property = check->property_setget.getptr(p_name);
-		if (property) {
-			if (property->setter != StringName()) {
-				resolve_accessor(p_class, property->setter, property->_setptr, property->index, true, r_accessors.setter);
-			}
-			break;
-		}
+	// In 4.8 the members of a type (including inherited ones) are in one map, so the first match decides.
+	const GDType::Member *member = type->members().getptr(p_name);
+	if (!member || member->type != GDType::Member::Type::PROPERTY) {
+		return;
+	}
+
+	const GDType::Member::Property &property = member->payload.property;
+	if (property.getter) {
+		resolve_accessor(p_class, property.getter->get_name(), property.index < 0 ? property.getter : nullptr, property.index, false, r_accessors.getter);
+	}
+	if (property.setter) {
+		resolve_accessor(p_class, property.setter->get_name(), property.setter, property.index, true, r_accessors.setter);
 	}
 }
 
@@ -1434,7 +1427,7 @@ void complete_resumed(GDScriptFunction::CallState *p_state, const Variant &p_res
 	p_state->completed.emit(arguments, 1);
 }
 
-bool call_method_bind(MethodBind *p_method, const Variant &p_base, const Variant **p_args, int p_argcount, Variant *r_return, const GritFrame &p_frame, int p_line) {
+bool call_method_bind(const MethodBind *p_method, const Variant &p_base, const Variant **p_args, int p_argcount, Variant *r_return, const GritFrame &p_frame, int p_line) {
 	Object *object = nullptr;
 	if (!resolve_method_base(p_method, p_base, object, p_frame, p_line)) {
 		return false;
@@ -1463,7 +1456,7 @@ bool call_method_bind(MethodBind *p_method, const Variant &p_base, const Variant
 	return true;
 }
 
-bool call_method_bind_validated(MethodBind *p_method, const Variant &p_base, const Variant **p_args, Variant &r_return, const GritFrame &p_frame, int p_line) {
+bool call_method_bind_validated(const MethodBind *p_method, const Variant &p_base, const Variant **p_args, Variant &r_return, const GritFrame &p_frame, int p_line) {
 	Object *object = nullptr;
 	if (!resolve_method_base(p_method, p_base, object, p_frame, p_line)) {
 		return false;
@@ -1478,7 +1471,7 @@ bool call_method_bind_validated(MethodBind *p_method, const Variant &p_base, con
 	return true;
 }
 
-bool call_method_bind_pointer(MethodBind *p_method, const Variant &p_base, const void **p_args, void *r_return, const GritFrame &p_frame, int p_line) {
+bool call_method_bind_pointer(const MethodBind *p_method, const Variant &p_base, const void **p_args, void *r_return, const GritFrame &p_frame, int p_line) {
 	Object *object = nullptr;
 	if (!resolve_method_base(p_method, p_base, object, p_frame, p_line)) {
 		return false;
@@ -1540,17 +1533,17 @@ bool call_builtin_static(Variant::Type p_type, const StringName &p_method, const
 	return true;
 }
 
-bool call_native_static(MethodBind *p_method, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line) {
+bool call_native_static(const MethodBind *p_method, const Variant **p_args, int p_argcount, Variant &r_return, const GritFrame &p_frame, int p_line) {
 	Callable::CallError call_error;
 	r_return = p_method->call(nullptr, p_args, p_argcount, call_error);
 	if (call_error.error != Callable::CallError::CALL_OK) {
-		report_error(p_frame, p_line, GritRuntimeAccess::get_call_error(p_frame.function, "static function '" + p_method->get_name().operator String() + "' in type '" + p_method->get_instance_class().operator String() + "'", p_args, p_argcount, r_return, call_error));
+		report_error(p_frame, p_line, GritRuntimeAccess::get_call_error(p_frame.function, "static function '" + String(p_method->get_name()) + "' in type '" + String(p_method->get_instance_class()) + "'", p_args, p_argcount, r_return, call_error));
 		return false;
 	}
 	return true;
 }
 
-void call_native_static_validated(MethodBind *p_method, const Variant **p_args, Variant &r_return) {
+void call_native_static_validated(const MethodBind *p_method, const Variant **p_args, Variant &r_return) {
 	if (p_method->has_return()) {
 		prepare(r_return, p_method->get_return_info().type);
 		p_method->validated_call(nullptr, p_args, &r_return);
@@ -1576,7 +1569,7 @@ bool call_super(const StringName &p_method, const Variant **p_args, int p_argcou
 		r_return = (*function)->call(p_frame.instance, p_args, p_argcount, call_error);
 	} else if (GritRuntimeAccess::get_native_class(script)) {
 		if (p_method != GDScriptLanguage::get_singleton()->strings._init) {
-			MethodBind *method = ClassDB::get_method(GritRuntimeAccess::get_native_class(script)->get_name(), p_method);
+			const MethodBind *method = ClassDB::get_method(GritRuntimeAccess::get_native_class(script)->get_name(), p_method);
 			if (!method) {
 				call_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
 			} else if (!p_frame.instance) {
@@ -1590,7 +1583,7 @@ bool call_super(const StringName &p_method, const Variant **p_args, int p_argcou
 	}
 
 	if (call_error.error != Callable::CallError::CALL_OK) {
-		report_error(p_frame, p_line, GritRuntimeAccess::get_call_error(p_frame.function, "function '" + p_method.operator String() + "'", p_args, p_argcount, r_return, call_error));
+		report_error(p_frame, p_line, GritRuntimeAccess::get_call_error(p_frame.function, "function '" + String(p_method) + "'", p_args, p_argcount, r_return, call_error));
 		return false;
 	}
 	return true;

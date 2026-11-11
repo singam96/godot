@@ -467,21 +467,21 @@ void GritRecordingCodeGenerator::write_call_native_static(const Address &p_targe
 	}
 }
 
-void GritRecordingCodeGenerator::write_call_native_static_validated(const Address &p_target, MethodBind *p_method, const Vector<Address> &p_arguments) {
+void GritRecordingCodeGenerator::write_call_native_static_validated(const Address &p_target, const MethodBind *p_method, const Vector<Address> &p_arguments) {
 	bytecode.write_call_native_static_validated(p_target, p_method, p_arguments);
 	if (is_recording) {
 		builder.write_call_native_static(p_target, p_method->get_instance_class(), p_method->get_name(), p_arguments, true);
 	}
 }
 
-void GritRecordingCodeGenerator::write_call_method_bind(const Address &p_target, const Address &p_base, MethodBind *p_method, const Vector<Address> &p_arguments) {
+void GritRecordingCodeGenerator::write_call_method_bind(const Address &p_target, const Address &p_base, const MethodBind *p_method, const Vector<Address> &p_arguments) {
 	bytecode.write_call_method_bind(p_target, p_base, p_method, p_arguments);
 	if (is_recording) {
 		builder.write_call_method_bind(p_target, p_base, p_method, p_arguments, false);
 	}
 }
 
-void GritRecordingCodeGenerator::write_call_method_bind_validated(const Address &p_target, const Address &p_base, MethodBind *p_method, const Vector<Address> &p_arguments) {
+void GritRecordingCodeGenerator::write_call_method_bind_validated(const Address &p_target, const Address &p_base, const MethodBind *p_method, const Vector<Address> &p_arguments) {
 	bytecode.write_call_method_bind_validated(p_target, p_base, p_method, p_arguments);
 	if (is_recording) {
 		builder.write_call_method_bind(p_target, p_base, p_method, p_arguments, true);
@@ -499,13 +499,6 @@ void GritRecordingCodeGenerator::write_call_self_async(const Address &p_target, 
 	bytecode.write_call_self_async(p_target, p_function_name, p_arguments);
 	if (is_recording) {
 		builder.write_call_async(p_target, Address(Address::SELF), p_function_name, p_arguments);
-	}
-}
-
-void GritRecordingCodeGenerator::write_call_script_function(const Address &p_target, const Address &p_base, const StringName &p_function_name, const Vector<Address> &p_arguments) {
-	bytecode.write_call_script_function(p_target, p_base, p_function_name, p_arguments);
-	if (is_recording) {
-		builder.write_call(p_target, p_base, p_function_name, p_arguments);
 	}
 }
 
