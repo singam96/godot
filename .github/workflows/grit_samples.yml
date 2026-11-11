@@ -1,0 +1,91 @@
+name: 🧪 Grit Samples
+# Builds the editor, runs the sample projects in the GDScript VM, exports them (which generates native C++),
+# builds an export template per project with that code, runs the native build and compares the results.
+on:
+  workflow_dispatch:
+
+env:
+  SCONS_FLAGS: >-
+    optimize=speed
+    debug_symbols=no
+    lto=none
+    dev_build=no
+    tests=no
+    strict_checks=no
+    module_text_server_fb_enabled=yes
+  PYTHONIOENCODING: utf8
+
+jobs:
+  samples:
+    name: Sample projects, VM vs native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install libwayland-bin
+
+      - name: Setup Python and SCons
+        uses: ./.github/actions/godot-deps
+
+      - name: Compile editor
+        run: scons platform=linuxbsd target=editor ${{ env.SCONS_FLAGS }} redirect_build_objects=no
+
+      - name: Run the samples in the VM
+        run: |
+          mkdir -p build
+          for project in flappy benchmark; do
+            timeout 600 ./bin/godot.linuxbsd.editor.x86_64 --headless --path samples/grit/$project 2>&1 | tee build/vm_$project.txt
+            test "${PIPESTATUS[0]}" = 0
+            grep -q '^result' build/vm_$project.txt
+          done
+        shell: bash
+
+      - name: Export the samples (generates the native C++)
+        run: |
+          for project in flappy benchmark; do
+            ./bin/godot.linuxbsd.editor.x86_64 --headless --path samples/grit/$project --export-pack "Linux" "$PWD/build/$project.pck" 2>&1 | tee build/export_$project.txt
+            test -s build/$project.pck
+            ls samples/grit/$project/.godot/grit/generated
+          done
+        shell: bash
+
+      - name: Build a template with the native code, per project
+        run: |
+          for project in flappy benchmark; do
+            scons platform=linuxbsd target=template_release ${{ env.SCONS_FLAGS }} redirect_build_objects=no extra_suffix=$project "grit_generated=samples/grit/$project/.godot/grit/generated"
+          done
+          ls -l bin/
+        shell: bash
+
+      - name: Run natively and compare with the VM
+        run: |
+          status=0
+          for project in flappy benchmark; do
+            timeout 600 ./bin/godot.linuxbsd.template_release.x86_64.$project --headless --main-pack "build/$project.pck" 2>&1 | tee build/native_$project.txt
+            test "${PIPESTATUS[0]}" = 0 || status=1
+            # Results must match exactly, timings are expected to differ.
+            grep '^result' build/vm_$project.txt > build/vm_$project.results
+            grep '^result' build/native_$project.txt > build/native_$project.results
+            if diff -u build/vm_$project.results build/native_$project.results; then
+              echo "$project: native results match the VM"
+            else
+              echo "::error::$project: native results differ from the VM"
+              status=1
+            fi
+            grep '^time' build/vm_$project.txt || true
+            grep '^time' build/native_$project.txt || true
+          done
+          exit $status
+        shell: bash
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grit-sample-logs
+          path: build/*.txt
