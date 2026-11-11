@@ -1329,6 +1329,18 @@
 				Sets the environment's background mode. Equivalent to [member Environment.background_mode].
 			</description>
 		</method>
+		<method name="environment_set_baked_outdoor_lighting">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="sun" type="RID" />
+			<param index="2" name="textures" type="RID[]" />
+			<param index="3" name="parameters" type="PackedFloat32Array" />
+			<param index="4" name="pages" type="PackedInt32Array" />
+			<param index="5" name="receiver_mask" type="int" />
+			<param index="6" name="moving_mask" type="int" />
+			<description>
+			</description>
+		</method>
 		<method name="environment_set_bg_color">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -2294,16 +2306,6 @@
 				[b]Note:[/b] The equivalent node is [LightmapGI].
 			</description>
 		</method>
-		<method name="lightmap_set_baked_sun_shadow_layers">
-			<return type="void" />
-			<param index="0" name="lightmap" type="RID" />
-			<param index="1" name="sun" type="RID" />
-			<param index="2" name="first_layer_offset" type="int" />
-			<param index="3" name="second_layer_offset" type="int" />
-			<description>
-				Associates an owner lightmap with its directional sun and two weighted direct visibility layer groups. Equivalent to [method LightmapGIData.set_baked_sun_shadow_layers]. Pass an empty sun [RID] and [code]-1[/code] offsets to disable.
-			</description>
-		</method>
 		<method name="lightmap_get_probe_capture_bsp_tree" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="lightmap" type="RID" />
@@ -2338,6 +2340,16 @@
 			<param index="1" name="baked_exposure" type="float" />
 			<description>
 				Used to inform the renderer what exposure normalization value was used while baking the lightmap. This value will be used and modulated at run time to ensure that the lightmap maintains a consistent level of exposure even if the scene-wide exposure normalization is changed at run time. For more information see [method camera_attributes_set_exposure].
+			</description>
+		</method>
+		<method name="lightmap_set_baked_sun_shadow_layers">
+			<return type="void" />
+			<param index="0" name="lightmap" type="RID" />
+			<param index="1" name="sun" type="RID" />
+			<param index="2" name="first_layer_offset" type="int" />
+			<param index="3" name="second_layer_offset" type="int" />
+			<description>
+				Associates an owner lightmap with its directional sun and two weighted direct visibility layer groups. Equivalent to [method LightmapGIData.set_baked_sun_shadow_layers]. Pass an empty sun [RID] and [code]-1[/code] offsets to disable.
 			</description>
 		</method>
 		<method name="lightmap_set_probe_bounds">

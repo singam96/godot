@@ -12,19 +12,15 @@
 		<link title="Third Person Shooter (TPS) Demo">https://godotengine.org/asset-library/asset/2710</link>
 	</tutorials>
 	<methods>
-		<method name="set_baked_shadow_lightmap">
-			<return type="void" />
-			<param index="0" name="lightmap" type="LightmapGIData" />
-			<param index="1" name="layer_offset" type="int" />
-			<description>
-				Opts a static [OmniLight3D] into live shadow modulation of its independently baked direct contribution in a non-directional lightmap. The lightmap's main slices must contain the composed lighting. The slices at [param layer_offset] plus each mesh's lightmap slice must contain this lamp's unoccluded irradiance in RGB and baked static visibility in alpha, using the same UV layout and exposure. Create these layers using [method LightmapGI.bake_lightmaps] with direct visibility enabled, and compose RGB multiplied by alpha into the main slices. The shader filters both RGB and RGB multiplied by alpha using the main lightmap's bicubic or linear setting, then subtracts [code]max(filtered_baked - filtered_unoccluded * live_visibility, 0)[/code]. For uniform irradiance, this reduces to RGB multiplied by [code]max(baked_visibility - live_visibility, 0)[/code], preserving static shadow edges, other lamps and indirect light without adding direct light twice.
-				Pass [code]null[/code] and [code]-1[/code] to disable. The association is runtime-only. Direct illumination of dynamic objects and their regular shadow caster geometry are unchanged. This feature is supported only in Forward+ with non-directional lightmaps; other renderers retain their standard static-light behavior. It does not eliminate the cost of shadow rendering.
-			</description>
-		</method>
 		<method name="get_correlated_color" qualifiers="const">
 			<return type="Color" />
 			<description>
 				Returns the [Color] of an idealized blackbody at the given [member light_temperature]. This value is calculated internally based on the [member light_temperature]. This [Color] is multiplied by [member light_color] before being sent to the [RenderingServer].
+			</description>
+		</method>
+		<method name="get_light_rid" qualifiers="const">
+			<return type="RID" />
+			<description>
 			</description>
 		</method>
 		<method name="get_param" qualifiers="const">
@@ -32,6 +28,15 @@
 			<param index="0" name="param" type="int" enum="Light3D.Param" />
 			<description>
 				Returns the value of the specified [enum Light3D.Param] parameter.
+			</description>
+		</method>
+		<method name="set_baked_shadow_lightmap">
+			<return type="void" />
+			<param index="0" name="lightmap" type="LightmapGIData" />
+			<param index="1" name="layer_offset" type="int" />
+			<description>
+				Opts a static [OmniLight3D] into live shadow modulation of its independently baked direct contribution in a non-directional lightmap. The lightmap's main slices must contain the composed lighting. The slices at [param layer_offset] plus each mesh's lightmap slice must contain this lamp's unoccluded irradiance in RGB and baked static visibility in alpha, using the same UV layout and exposure. Create these layers using [method LightmapGI.bake_lightmaps] with direct visibility enabled, and compose RGB multiplied by alpha into the main slices. The shader filters both RGB and RGB multiplied by alpha using the main lightmap's bicubic or linear setting, then subtracts [code]max(filtered_baked - filtered_unoccluded * live_visibility, 0)[/code]. For uniform irradiance, this reduces to RGB multiplied by [code]max(baked_visibility - live_visibility, 0)[/code], preserving static shadow edges, other lamps and indirect light without adding direct light twice.
+				Pass [code]null[/code] and [code]-1[/code] to disable. The association is runtime-only. Direct illumination of dynamic objects and their regular shadow caster geometry are unchanged. This feature is supported only in Forward+ with non-directional lightmaps; other renderers retain their standard static-light behavior. It does not eliminate the cost of shadow rendering.
 			</description>
 		</method>
 		<method name="set_param">
