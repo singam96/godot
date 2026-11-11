@@ -769,7 +769,7 @@ bool get_named(const Variant &p_base, const StringName &p_name, Variant &r_targe
 #ifdef DEBUG_ENABLED
 	Variant result = p_base.get_named(p_name, valid);
 	if (!valid) {
-		report_error(p_frame, p_line, "Invalid access to property or key '" + p_name.operator String() + "' on a base object of type '" + value_type_name(&p_base) + "'.");
+		report_error(p_frame, p_line, "Invalid access to property or key '" + String(p_name) + "' on a base object of type '" + value_type_name(&p_base) + "'.");
 		return false;
 	}
 	r_target = std::move(result);
@@ -1296,7 +1296,7 @@ Variant *writable_script_member(const Variant &p_base, const StringName &p_name,
 
 void stack_overflow(GDScriptFunction *p_function, GDScriptInstance *p_instance) {
 #ifdef DEBUG_ENABLED
-	const bool instance_valid = p_instance && ObjectDB::get_instance(GritRuntimeAccess::get_owner_id(p_instance)) != nullptr && GritRuntimeAccess::get_instance_script(p_instance)->is_valid();
+	const bool instance_valid = p_instance && ObjectDB::get_instance(GritRuntimeAccess::get_owner_id(p_instance)) != nullptr && GritRuntimeAccess::get_instance_script(p_instance)->is_script_valid();
 	String file;
 	if (instance_valid && !GritRuntimeAccess::get_instance_script(p_instance)->get_script_path().is_empty()) {
 		file = GritRuntimeAccess::get_instance_script(p_instance)->get_script_path();
@@ -1525,7 +1525,7 @@ bool call_builtin_static(Variant::Type p_type, const StringName &p_method, const
 #ifdef DEBUG_ENABLED
 	if (call_error.error != Callable::CallError::CALL_OK) {
 		r_return = result;
-		report_error(p_frame, p_line, GritRuntimeAccess::get_call_error(p_frame.function, "static function '" + p_method.operator String() + "' in type '" + Variant::get_type_name(p_type) + "'", p_args, p_argcount, result, call_error));
+		report_error(p_frame, p_line, GritRuntimeAccess::get_call_error(p_frame.function, "static function '" + String(p_method) + "' in type '" + Variant::get_type_name(p_type) + "'", p_args, p_argcount, result, call_error));
 		return false;
 	}
 #endif
