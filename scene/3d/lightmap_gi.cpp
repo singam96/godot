@@ -865,18 +865,18 @@ LightmapGI::BakeError LightmapGI::_save_and_reimport_atlas_textures(const Ref<Li
 	for (int i = 0; i < texture_count; i++) {
 		const int texture_slice_count = (i == texture_count - 1 && last_count != 0) ? last_count : slices_per_texture;
 		if (save_native_textures) {
-			Vector<Ref<Image>> layers;
+			Vector<Ref<Image>> native_layers;
 			for (int j = 0; j < texture_slice_count; j++) {
 				Ref<Image> layer = images[i * slices_per_texture + j];
 				if (supersampling_enabled) {
 					layer = layer->duplicate();
 					layer->resize(layer->get_width() / supersampling_factor, layer->get_height() / supersampling_factor, Image::INTERPOLATE_TRILINEAR);
 				}
-				layers.push_back(layer);
+				native_layers.push_back(layer);
 			}
 			Ref<Texture2DArray> texture;
 			texture.instantiate();
-			ERR_FAIL_COND_V(texture->create_from_images(layers) != OK, BAKE_ERROR_CANT_CREATE_IMAGE);
+			ERR_FAIL_COND_V(texture->create_from_images(native_layers) != OK, BAKE_ERROR_CANT_CREATE_IMAGE);
 			const String atlas_path = p_base_name + "_" + itos(i) + ".res";
 			ERR_FAIL_COND_V(ResourceSaver::save(texture, atlas_path) != OK, BAKE_ERROR_CANT_CREATE_IMAGE);
 			texture->set_path(atlas_path, true);
@@ -1106,6 +1106,8 @@ LightmapGI::BakeError LightmapGI::_prepare_bake_occluder_material(const Ref<Mate
 			break;
 		case BaseMaterial3D::CULL_DISABLED:
 			r_material.cull_mode = RSE::CULL_MODE_DISABLED;
+			break;
+		case BaseMaterial3D::CULL_MAX:
 			break;
 	}
 	if (material->get_transparency() == BaseMaterial3D::TRANSPARENCY_DISABLED) {
