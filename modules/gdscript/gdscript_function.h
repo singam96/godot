@@ -150,6 +150,9 @@ public:
 
 class GDScriptFunction {
 public:
+	struct CallState;
+	typedef Variant (*NativeCall)(GDScriptFunction *p_function, GDScriptInstance *p_instance, const Variant **p_args, int p_argcount, Callable::CallError &r_err, CallState *p_state);
+
 	enum Opcode {
 		OPCODE_OPERATOR,
 		OPCODE_OPERATOR_VALIDATED,
@@ -343,6 +346,7 @@ private:
 	friend class GDScriptCompiler;
 	friend class GDScriptByteCodeGenerator;
 	friend class GDScriptLanguage;
+	friend class GritRuntimeAccess;
 
 	StringName name;
 	StringName source;
@@ -402,6 +406,10 @@ private:
 	int _gds_utilities_count = 0;
 	int _methods_count = 0;
 	int _lambdas_count = 0;
+
+	NativeCall native_call = nullptr;
+	Vector<Variant> native_constants;
+	static thread_local int call_depth;
 
 	int *_code_ptr = nullptr;
 	const int *_default_arg_ptr = nullptr;
@@ -485,6 +493,8 @@ public:
 	_FORCE_INLINE_ int get_argument_count() const { return _argument_count; }
 	_FORCE_INLINE_ Variant get_rpc_config() const { return rpc_config; }
 	_FORCE_INLINE_ int get_max_stack_size() const { return _stack_size; }
+	_FORCE_INLINE_ NativeCall get_native_call() const { return native_call; }
+	_FORCE_INLINE_ void set_native_call(NativeCall p_native_call) { native_call = p_native_call; }
 
 	Variant get_constant(int p_idx) const;
 	StringName get_global_name(int p_idx) const;
@@ -505,6 +515,7 @@ class GDScriptFunctionState : public RefCounted {
 	GDCLASS(GDScriptFunctionState, RefCounted);
 
 	friend class GDScriptFunction;
+	friend class GritRuntimeAccess;
 
 	GDScriptFunction *function = nullptr;
 	GDScriptFunction::CallState state;

@@ -78,6 +78,7 @@ class GDScript : public Script {
 	friend class GDScriptLambdaSelfCallable;
 	friend class GDScriptLanguage;
 	friend struct GDScriptUtilityFunctionsDefinitions;
+	friend class GritRuntimeAccess;
 
 	Ref<GDScriptNativeClass> native;
 	Ref<GDScript> base;
@@ -344,6 +345,7 @@ class GDScriptInstance : public ScriptInstance {
 	friend class GDScriptCompiler;
 	friend class GDScriptCache;
 	friend struct GDScriptUtilityFunctionsDefinitions;
+	friend class GritRuntimeAccess;
 
 	ObjectID owner_id;
 	Object *owner = nullptr;
@@ -435,6 +437,7 @@ class GDScriptLanguage : public ScriptLanguage {
 	String _get_global_class_name(const String &p_path, String *r_base_type, String *r_icon_path, bool *r_is_abstract, bool *r_is_tool, LocalVector<String> &r_visited) const;
 
 	friend class GDScriptInstance;
+	friend class GritRuntimeAccess;
 
 	Mutex mutex;
 

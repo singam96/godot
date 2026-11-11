@@ -404,6 +404,7 @@ private:
 	friend struct _ObjectDebugLock;
 #endif // DEBUG_ENABLED
 	friend struct ObjectSignalLock;
+	friend class GritRuntimeAccess;
 	friend bool predelete_handler(Object *);
 	friend void postinitialize_handler(Object *);
 

@@ -173,7 +173,13 @@ class GDScriptCompiler {
 	GDScriptParser::ExpressionNode *awaited_node = nullptr;
 	bool has_static_data = false;
 
+	static GDScriptCodeGenerator *_create_code_generator();
+
 public:
+	typedef GDScriptCodeGenerator *(*CodeGeneratorFactory)();
+
+	static void set_code_generator_factory(CodeGeneratorFactory p_factory);
+
 	static void convert_to_initializer_type(Variant &p_variant, const GDScriptParser::VariableNode *p_node);
 	static void make_scripts(GDScript *p_script, const GDScriptParser::ClassNode *p_class, bool p_keep_state);
 	Error compile(const GDScriptParser *p_parser, GDScript *p_script, bool p_keep_state = false);

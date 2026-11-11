@@ -379,6 +379,9 @@ void GDScriptLanguage::debug_get_stack_level_locals(int p_level, List<String> *r
 
 	CallLevel *cl = _get_stack_level(p_level);
 	GDScriptFunction *f = cl->function;
+	if (!cl->stack) {
+		return;
+	}
 
 	List<Pair<StringName, int>> locals;
 

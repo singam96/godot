@@ -462,6 +462,8 @@ void (*type_init_function_table[])(Variant *) = {
 #define METHOD_CALL_ON_NULL_VALUE_ERROR(method_pointer) "Cannot call method '" + (method_pointer)->get_name() + "' on a null value."
 #define METHOD_CALL_ON_FREED_INSTANCE_ERROR(method_pointer) "Cannot call method '" + (method_pointer)->get_name() + "' on a previously freed instance."
 
+thread_local int GDScriptFunction::call_depth = 0;
+
 Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_args, int p_argcount, Callable::CallError &r_err, CallState *p_state) {
 	GodotProfileZoneScript(this, source, name, name, _initial_line);
 
@@ -473,7 +475,6 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 	r_err.error = Callable::CallError::CALL_OK;
 
-	static thread_local int call_depth = 0;
 	if (unlikely(++call_depth > MAX_CALL_DEPTH)) {
 		call_depth--;
 #ifdef DEBUG_ENABLED
@@ -491,6 +492,12 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		GDScriptLanguage::get_singleton()->debug_break(err_text, false);
 #endif
 		return GDScriptHelper::construct_empty_value_for_data_type(return_type);
+	}
+
+	if (native_call) {
+		Variant native_result = native_call(this, p_instance, p_args, p_argcount, r_err, p_state);
+		call_depth--;
+		return native_result;
 	}
 
 	Variant retvalue;

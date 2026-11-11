@@ -2285,10 +2285,23 @@ Error GDScriptCompiler::_parse_block(CodeGen &codegen, const GDScriptParser::Sui
 	return OK;
 }
 
+static GDScriptCompiler::CodeGeneratorFactory code_generator_factory = nullptr;
+
+void GDScriptCompiler::set_code_generator_factory(CodeGeneratorFactory p_factory) {
+	code_generator_factory = p_factory;
+}
+
+GDScriptCodeGenerator *GDScriptCompiler::_create_code_generator() {
+	if (code_generator_factory) {
+		return code_generator_factory();
+	}
+	return memnew(GDScriptByteCodeGenerator);
+}
+
 GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_script, const GDScriptParser::ClassNode *p_class, const GDScriptParser::FunctionNode *p_func, bool p_for_ready, bool p_for_lambda) {
 	r_error = OK;
 	CodeGen codegen;
-	codegen.generator = memnew(GDScriptByteCodeGenerator);
+	codegen.generator = _create_code_generator();
 
 	codegen.class_node = p_class;
 	codegen.script = p_script;
@@ -2548,7 +2561,7 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 GDScriptFunction *GDScriptCompiler::_make_static_initializer(Error &r_error, GDScript *p_script, const GDScriptParser::ClassNode *p_class) {
 	r_error = OK;
 	CodeGen codegen;
-	codegen.generator = memnew(GDScriptByteCodeGenerator);
+	codegen.generator = _create_code_generator();
 
 	codegen.class_node = p_class;
 	codegen.script = p_script;
