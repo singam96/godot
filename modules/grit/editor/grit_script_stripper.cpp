@@ -84,14 +84,14 @@ void GritScriptStripper::strip_class(const GDScriptParser::ClassNode *p_class, c
 				const String id = function_id(p_class_path, member.function->identifier->name);
 				if (strippable->has(id)) {
 					const GDScriptParser::TypeNode *return_type = member.function->return_type;
-					strip_function(member.function, id, return_type ? stub(return_type->get_datatype(), return_type) : String("pass"));
+					strip_function(member.function, id, return_type ? stub(return_type->resolved_type, return_type) : String("pass"));
 				}
 			} break;
 			case GDScriptParser::ClassNode::Member::VARIABLE: {
 				const GDScriptParser::VariableNode *variable = member.variable;
 				if (variable->property == GDScriptParser::VariableNode::PROP_INLINE) {
 					strip_accessor(variable->setter, p_class_path, "pass");
-					strip_accessor(variable->getter, p_class_path, stub(variable->get_datatype(), variable->datatype_specifier));
+					strip_accessor(variable->getter, p_class_path, stub(variable->type_constraint, variable->datatype_specifier));
 				}
 			} break;
 			case GDScriptParser::ClassNode::Member::CLASS:
