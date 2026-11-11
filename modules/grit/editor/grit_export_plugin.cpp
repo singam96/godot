@@ -2,7 +2,7 @@
 
 #include "grit_project_compiler.h"
 
-#include "grit/runtime/grit_registry.h"
+#include "modules/grit/runtime/grit_registry.h"
 
 #include "modules/gdscript/gdscript.h"
 #include "modules/gdscript/gdscript_tokenizer_buffer.h"

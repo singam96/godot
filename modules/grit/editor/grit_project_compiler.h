@@ -1,6 +1,6 @@
 #pragma once
 
-#include "grit/compiler/grit_ir.h"
+#include "modules/grit/compiler/grit_ir.h"
 
 #include "core/object/ref_counted.h"
 #include "core/string/ustring.h"

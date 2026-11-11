@@ -2,8 +2,8 @@
 
 #include "grit_function_builder.h"
 
-#include "grit/runtime/grit_function_nesting.h"
-#include "grit/runtime/grit_signature.h"
+#include "modules/grit/runtime/grit_function_nesting.h"
+#include "modules/grit/runtime/grit_signature.h"
 
 #include "modules/gdscript/gdscript_byte_codegen.h"
 

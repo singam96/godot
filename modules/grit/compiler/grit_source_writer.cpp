@@ -2,7 +2,7 @@
 
 #include "grit_cpp_emitter.h"
 
-#include "grit/runtime/grit_registry.h"
+#include "modules/grit/runtime/grit_registry.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"

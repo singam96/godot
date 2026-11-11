@@ -1,6 +1,6 @@
 #include "grit_ir.h"
 
-#include "grit/runtime/grit_registry.h"
+#include "modules/grit/runtime/grit_registry.h"
 
 #include "modules/gdscript/gdscript.h"
 

@@ -2,7 +2,7 @@
 
 #include "grit_cpp_emitter.h"
 
-#include "grit/runtime/grit_signature.h"
+#include "modules/grit/runtime/grit_signature.h"
 
 #include "modules/gdscript/gdscript.h"
 

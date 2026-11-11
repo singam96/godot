@@ -2,8 +2,8 @@
 
 #include "grit_script_stripper.h"
 
-#include "grit/compiler/grit_recording_code_generator.h"
-#include "grit/compiler/grit_source_writer.h"
+#include "modules/grit/compiler/grit_recording_code_generator.h"
+#include "modules/grit/compiler/grit_source_writer.h"
 
 #include "modules/gdscript/gdscript.h"
 #include "modules/gdscript/gdscript_cache.h"

@@ -2,8 +2,8 @@
 
 #include "grit_inline_catalog.h"
 
-#include "grit/runtime/grit_registry.h"
-#include "grit/runtime/grit_runtime.h"
+#include "modules/grit/runtime/grit_registry.h"
+#include "modules/grit/runtime/grit_runtime.h"
 
 #include "core/object/class_db.h"
 #include "core/object/method_bind.h"

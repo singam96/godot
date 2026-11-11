@@ -2,6 +2,7 @@
 
 #include "modules/gdscript/gdscript.h"
 #include "modules/gdscript/gdscript_function.h"
+#include "modules/gdscript/gdscript_helper.h"
 
 class GritRuntimeAccess {
 public:
@@ -13,19 +14,27 @@ public:
 	static _FORCE_INLINE_ bool is_instance_valid(const GDScriptInstance *p_instance) {
 		return p_instance && ObjectDB::get_instance(p_instance->owner_id) != nullptr && p_instance->script.is_valid();
 	}
-	static _FORCE_INLINE_ Variant *get_members(GDScriptInstance *p_instance) { return p_instance->members.ptrw(); }
+	static _FORCE_INLINE_ Variant *get_members(GDScriptInstance *p_instance) { return p_instance->members.ptr(); }
 	static _FORCE_INLINE_ int get_member_count(const GDScriptInstance *p_instance) { return p_instance->members.size(); }
 
 	static _FORCE_INLINE_ GDScript *get_function_script(const GDScriptFunction *p_function) { return p_function->_script; }
 	static _FORCE_INLINE_ const Variant *get_native_constants(const GDScriptFunction *p_function) { return p_function->native_constants.ptr(); }
 	static _FORCE_INLINE_ void set_native_constants(GDScriptFunction *p_function, const Vector<Variant> &p_constants) { p_function->native_constants = p_constants; }
 	static _FORCE_INLINE_ const GDScriptDataType &get_argument_type(const GDScriptFunction *p_function, int p_index) { return p_function->argument_types[p_index]; }
-	static _FORCE_INLINE_ Variant get_default_return(GDScriptFunction *p_function) { return p_function->_get_default_variant_for_data_type(p_function->return_type); }
+	static _FORCE_INLINE_ Variant get_default_return(GDScriptFunction *p_function) { return GDScriptHelper::construct_empty_value_for_data_type(p_function->return_type); }
 	static _FORCE_INLINE_ String get_call_error(const GDScriptFunction *p_function, const String &p_where, const Variant **p_arguments, int p_argument_count, const Variant &p_return, const Callable::CallError &p_error) {
+#ifdef DEBUG_ENABLED
 		return p_function->_get_call_error(p_where, p_arguments, p_argument_count, p_return, p_error);
+#else
+		return String();
+#endif
 	}
 	static _FORCE_INLINE_ String get_callable_call_error(const GDScriptFunction *p_function, const String &p_where, const Callable &p_callable, const Variant **p_arguments, int p_argument_count, const Variant &p_return, const Callable::CallError &p_error) {
+#ifdef DEBUG_ENABLED
 		return p_function->_get_callable_call_error(p_where, p_callable, p_arguments, p_argument_count, p_return, p_error);
+#else
+		return String();
+#endif
 	}
 
 	static _FORCE_INLINE_ GDScriptFunction *get_lambda(const GDScriptFunction *p_function, int p_index) {

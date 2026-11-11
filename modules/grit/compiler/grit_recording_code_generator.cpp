@@ -1,6 +1,6 @@
 #include "grit_recording_code_generator.h"
 
-#include "grit/runtime/grit_runtime_access.h"
+#include "modules/grit/runtime/grit_runtime_access.h"
 
 #include "modules/gdscript/gdscript.h"
 
