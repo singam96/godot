@@ -6,7 +6,7 @@ on:
   # Temporary: lets the workflow run from the integration branch before it exists on master.
   push:
     branches: [grit-integration]
-    paths: ['.github/workflows/grit_samples.yml', 'samples/grit/**']
+    paths: ['.github/workflows/grit_samples.yml', 'samples/grit/**', 'modules/grit/**']
 
 env:
   SCONS_FLAGS: >-
