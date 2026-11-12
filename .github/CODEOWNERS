@@ -7,6 +7,8 @@
 /.github/                                     @godotengine/buildsystem
 /*                                            @godotengine/buildsystem
 /hlod_addon/                                  @singam96
+/modules/grit/                                @singam96
+/samples/                                     @singam96
 /hlod_addon/tests/                            @singam96 @godotengine/tests
 
 # Core

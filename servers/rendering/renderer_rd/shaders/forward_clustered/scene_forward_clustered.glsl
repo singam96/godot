@@ -2800,19 +2800,19 @@ void fragment_shader(in SceneData scene_data) {
 
 #endif // SHADOWS_DISABLED
 
-	if (baked_outdoor_receiver(instance_index) && outdoor_lighting.info.y < scene_data.directional_light_count) {
-		uint sun_index = outdoor_lighting.info.y;
-		if (bool(directional_lights.data[sun_index].mask & instances.data[instance_index].layer_mask)) {
-			vec3 world_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
-			vec3 world_normal = normalize(mat3(inv_view_matrix) * normal);
-			vec3 world_geo_normal = mat3(inv_view_matrix) * geo_normal;
-			float moving_shadow = 1.0;
+		if (baked_outdoor_receiver(instance_index) && outdoor_lighting.info.y < scene_data.directional_light_count) {
+			uint sun_index = outdoor_lighting.info.y;
+			if (bool(directional_lights.data[sun_index].mask & instances.data[instance_index].layer_mask)) {
+				vec3 world_position = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+				vec3 world_normal = normalize(mat3(inv_view_matrix) * normal);
+				vec3 world_geo_normal = mat3(inv_view_matrix) * geo_normal;
+				float moving_shadow = 1.0;
 #ifndef SHADOWS_DISABLED
-			moving_shadow = sun_index < 4u ? float((shadow0 >> (sun_index * 8u)) & 255u) / 255.0 : float((shadow1 >> ((sun_index - 4u) * 8u)) & 255u) / 255.0;
+				moving_shadow = sun_index < 4u ? float((shadow0 >> (sun_index * 8u)) & 255u) / 255.0 : float((shadow1 >> ((sun_index - 4u) * 8u)) & 255u) / 255.0;
 #endif
-			diffuse_light += baked_outdoor_solar_irradiance(world_position, world_normal, world_geo_normal, moving_shadow, directional_lights.data[sun_index].shadow_opacity) * scene_data.emissive_exposure_normalization;
+				diffuse_light += baked_outdoor_solar_irradiance(world_position, world_normal, world_geo_normal, moving_shadow, directional_lights.data[sun_index].shadow_opacity) * scene_data.emissive_exposure_normalization;
+			}
 		}
-	}
 
 #ifndef USE_VERTEX_LIGHTING
 

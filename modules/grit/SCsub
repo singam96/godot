@@ -46,7 +46,9 @@ def expand_registration_macros(source):
 def inline_operators():
     header = read_engine_file("variant_op.h")
     source = read_engine_file("variant_op.cpp")
-    specialized = {compact(name) for name in re.findall(r"template <>\s*(?:class|struct) (\w+<[^{;]*?>)\s*[:{]", source)}
+    specialized = {
+        compact(name) for name in re.findall(r"template <>\s*(?:class|struct) (\w+<[^{;]*?>)\s*[:{]", source)
+    }
     names = []
     for name in unique(re.findall(r"register_op<(\w+(?:<[^;]*?>)?)>\(", source) + expand_registration_macros(source)):
         if "m_" in name or compact(name) in specialized or not declares(header, name.split("<", 1)[0]):

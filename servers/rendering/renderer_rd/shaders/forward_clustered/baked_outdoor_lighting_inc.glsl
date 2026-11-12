@@ -8,7 +8,8 @@ layout(set = 1, binding = 43, std430) restrict readonly buffer OutdoorLighting {
 	uvec4 info; // enabled, directional index, static receiver mask, moving mask
 	vec4 parameters[20];
 	int pages[];
-} outdoor_lighting;
+}
+outdoor_lighting;
 
 bool baked_outdoor_receiver(uint instance_idx) {
 	return outdoor_lighting.info.x != 0u &&

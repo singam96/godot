@@ -32,7 +32,6 @@
 
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
-#include "core/variant/typed_array.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
 
