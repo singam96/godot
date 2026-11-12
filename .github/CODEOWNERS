@@ -8,6 +8,10 @@
 /*                                            @godotengine/buildsystem
 /hlod_addon/                                  @singam96
 /modules/grit/                                @singam96
+/modules/grit/**/*.py                         @singam96 @godotengine/buildsystem
+/modules/grit/**/SCsub                        @singam96 @godotengine/buildsystem
+/modules/grit/editor/                         @singam96 @godotengine/editor
+/modules/grit/tests/                          @singam96 @godotengine/tests
 /samples/                                     @singam96
 /hlod_addon/tests/                            @singam96 @godotengine/tests
 
