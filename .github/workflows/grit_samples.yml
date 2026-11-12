@@ -3,6 +3,10 @@ name: 🧪 Grit Samples
 # builds an export template per project with that code, runs the native build and compares the results.
 on:
   workflow_dispatch:
+  # Temporary: lets the workflow run from the integration branch before it exists on master.
+  push:
+    branches: [grit-integration]
+    paths: ['.github/workflows/grit_samples.yml', 'samples/grit/**']
 
 env:
   SCONS_FLAGS: >-
