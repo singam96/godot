@@ -20,4 +20,5 @@ CI runs: dispatch `linux_builds.yml` with `gh workflow run linux_builds.yml -R s
 - Grit's `tools/grit.py` workflow assumes a separate 4.7.2 checkout. Here the module lives in-tree, so builds are plain `scons` with the module enabled; `tools/` is not imported.
 - Local machine has no `scons` or X11/audio dev libraries, so all compile checks go through GitHub Actions.
 - `get_stack()` is not populated by native code; the sample comparison skips that probe. Native vs VM is compared against a debug template (release templates differ on `is_debug_build()` paths).
+- `Stack underflow! (Engine Bug)` in the VM sample logs is stock: `depth(3000)` in `call_checks.gd` overflows `max_call_stack` on purpose, and stock `enter_function` skips the push while `exit_function` still pops (same code as upstream, untouched by Grit).
 - Not yet verified by eye: shadow/MultiMesh/texture-budget rendering changes. Needs a scene run.

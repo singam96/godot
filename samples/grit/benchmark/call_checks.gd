@@ -53,6 +53,9 @@ static func scaled(value: float, factor := 2.0, offset := 0.5) -> float:
 	return value * factor + offset
 
 
+# Deliberately deeper than debug/settings/gdscript/max_call_stack (1024): the VM and native code must hit the
+# same limit and recover the same way. The engine prints "Stack underflow" errors while this unwinds; that is stock
+# behaviour (enter_function skips the push past the limit, exit_function still pops), not a Grit problem.
 static func depth(remaining: int) -> int:
 	if remaining == 0:
 		return 0
