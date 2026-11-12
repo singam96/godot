@@ -120,6 +120,11 @@ bool EditorExportPlatformPC::has_valid_export_configuration(const Ref<EditorExpo
 		}
 	}
 
+	if (native_template_provider) {
+		dvalid = dvalid || !native_template_provider(p_preset, true, true).is_empty();
+		rvalid = rvalid || !native_template_provider(p_preset, false, true).is_empty();
+	}
+
 	valid = dvalid || rvalid;
 	r_missing_templates = !valid;
 
@@ -273,6 +278,10 @@ Error EditorExportPlatformPC::prepare_template(const Ref<EditorExportPreset> &p_
 	String template_path = p_debug ? custom_debug : custom_release;
 
 	template_path = template_path.strip_edges();
+
+	if (template_path.is_empty() && native_template_provider) {
+		template_path = native_template_provider(p_preset, p_debug, false);
+	}
 
 	if (template_path.is_empty()) {
 		template_path = find_export_template(get_template_file_name(p_debug ? "debug" : "release", p_preset->get("binary_format/architecture")));

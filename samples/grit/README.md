@@ -15,13 +15,18 @@ bin/godot.linuxbsd.editor.x86_64 --headless --path samples/grit/benchmark
 
 ## Native (Grit) export
 
-Exporting writes the generated C++ to `samples/grit/<project>/.godot/grit/generated`. Build an export template with it, then select
-that template in the preset:
+Exporting is automatic. When a Linux export runs on a Linux machine with the engine source (an editor built in the source tree),
+Grit generates the C++, builds an export template with it (`grit/export/build_template`, on by default) and uses that template
+for the exported game. If the engine source or SCons is not available, the export still works and runs the scripts in the VM.
 
 ```sh
-bin/godot.linuxbsd.editor.x86_64 --headless --path samples/grit/flappy --export-pack Linux build/flappy.pck
-scons platform=linuxbsd target=template_release module_grit_enabled=yes grit_generated=samples/grit/flappy/.godot/grit/generated
+bin/godot.linuxbsd.editor.x86_64 --headless --path samples/grit/flappy --export-release Linux build/flappy
 ```
+
+The first export compiles the whole engine, later ones only rebuild what changed. Set `grit/export/engine_source_directory`,
+`grit/export/scons_command` and `grit/export/scons_arguments` in the project settings if the defaults do not fit your setup.
+Exports for other platforms and exports with a custom template are not built automatically: build the template yourself with
+`grit_generated` pointing at `.godot/grit/generated`.
 
 Compare VM and native results by running the exported game with and without `GRIT_DISABLE=1`.
 See `modules/grit` and https://github.com/singam96/grit for the full workflow.

@@ -51,7 +51,14 @@ protected:
 public:
 	static constexpr const char *SETTING_ENABLED = "grit/export/enabled";
 	static constexpr const char *SETTING_GENERATED_DIRECTORY = "grit/export/generated_directory";
+	static constexpr const char *SETTING_BUILD_TEMPLATE = "grit/export/build_template";
+	static constexpr const char *SETTING_ENGINE_SOURCE_DIRECTORY = "grit/export/engine_source_directory";
+	static constexpr const char *SETTING_SCONS_COMMAND = "grit/export/scons_command";
+	static constexpr const char *SETTING_SCONS_ARGUMENTS = "grit/export/scons_arguments";
 	static constexpr const char *OPTION_STRIP_SCRIPTS = "grit/strip_scripts";
+
+	// Generates the native code and builds an export template with it, see EditorExportPlatformPC::native_template_provider.
+	static String provide_native_template(const Ref<EditorExportPreset> &p_preset, bool p_debug, bool p_check_only);
 
 	virtual String get_name() const override { return "Grit"; }
 };

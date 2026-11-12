@@ -1242,11 +1242,23 @@
 		<member name="filesystem/import/fbx2gltf/enabled.web" type="bool" setter="" getter="" default="false">
 			Override for [member filesystem/import/fbx2gltf/enabled] on the Web where FBX2glTF can't easily be accessed from Godot.
 		</member>
+		<member name="grit/export/build_template" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the Grit module builds an export template containing the generated native code after generating it, and uses it for the exported game. This needs the engine source code and SCons, see [member grit/export/engine_source_directory] and [member grit/export/scons_command]. Supported are Linux exports from Linux, and Windows exports from Windows or, using MinGW, from Linux. If the build is not possible, the export still succeeds and the game runs the scripts in the GDScript VM. Not used when the export preset sets a custom template.
+		</member>
 		<member name="grit/export/enabled" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the Grit module generates native C++ code for the project's GDScript when exporting. The code is written to [member grit/export/generated_directory] and has to be compiled into a custom export template.
 		</member>
+		<member name="grit/export/engine_source_directory" type="String" setter="" getter="" default="&quot;&quot;">
+			The Godot source directory used to build the export template when [member grit/export/build_template] is enabled. If empty, the directory containing the running editor's [code]bin[/code] folder is used when it is a source checkout.
+		</member>
 		<member name="grit/export/generated_directory" type="String" setter="" getter="" default="&quot;res://.godot/grit/generated&quot;">
 			The directory the Grit module writes the generated C++ sources to during export.
+		</member>
+		<member name="grit/export/scons_arguments" type="String" setter="" getter="" default="&quot;optimize=speed debug_symbols=no lto=none&quot;">
+			Extra arguments, separated by spaces, passed to SCons when building the export template. Use this for options such as disabling modules or display drivers, to match how your engine is built.
+		</member>
+		<member name="grit/export/scons_command" type="String" setter="" getter="" default="&quot;scons&quot;">
+			The command used to run SCons when building the export template. It may include arguments, for example [code]python3 -m SCons[/code].
 		</member>
 		<member name="gui/common/auto_focus_strategy" type="int" setter="" getter="" default="0">
 			Determines what strategy to use when inferring the top/left/right/bottom [Control] to focus if no neighbor is defined.

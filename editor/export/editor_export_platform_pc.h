@@ -48,6 +48,11 @@ private:
 	bool _copy_debugsymbols(Ref<DirAccess> &p_da, const String &p_path, const String &p_symbols_path, Error &r_err);
 
 public:
+	// Lets a module (Grit) supply a template that is built for the project being exported. When it returns a path, that template is used
+	// instead of the installed one. With p_check_only it must not build anything, it only says whether it could provide a template.
+	typedef String (*NativeTemplateProvider)(const Ref<EditorExportPreset> &p_preset, bool p_debug, bool p_check_only);
+	static inline NativeTemplateProvider native_template_provider = nullptr;
+
 	virtual void get_preset_features(const Ref<EditorExportPreset> &p_preset, List<String> *r_features) const override;
 	virtual void get_export_options(List<ExportOption> *r_options) const override;
 	virtual String get_export_option_warning(const EditorExportPreset *p_preset, const StringName &p_name) const override;

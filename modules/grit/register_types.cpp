@@ -42,6 +42,7 @@
 #include "core/config/project_settings.h"
 #include "editor/editor_node.h"
 #include "editor/export/editor_export.h"
+#include "editor/export/editor_export_platform_pc.h"
 #include "editor/grit_export_plugin.h"
 #endif
 
@@ -69,6 +70,7 @@ static void grit_editor_init() {
 		editor_export->remove_export_plugin(plugin);
 	}
 	editor_export->add_export_plugin(export_plugin);
+	EditorExportPlatformPC::native_template_provider = &GritExportPlugin::provide_native_template;
 	for (const Ref<EditorExportPlugin> &plugin : other_plugins) {
 		editor_export->add_export_plugin(plugin);
 	}
@@ -86,6 +88,10 @@ void initialize_grit_module(ModuleInitializationLevel p_level) {
 #ifdef TOOLS_ENABLED
 	GLOBAL_DEF(GritExportPlugin::SETTING_ENABLED, true);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, GritExportPlugin::SETTING_GENERATED_DIRECTORY, PROPERTY_HINT_DIR), "res://.godot/grit/generated");
+	GLOBAL_DEF(GritExportPlugin::SETTING_BUILD_TEMPLATE, true);
+	GLOBAL_DEF(PropertyInfo(Variant::STRING, GritExportPlugin::SETTING_ENGINE_SOURCE_DIRECTORY, PROPERTY_HINT_GLOBAL_DIR), "");
+	GLOBAL_DEF(GritExportPlugin::SETTING_SCONS_COMMAND, "scons");
+	GLOBAL_DEF(GritExportPlugin::SETTING_SCONS_ARGUMENTS, "optimize=speed debug_symbols=no lto=none");
 	EditorNode::add_init_callback(grit_editor_init);
 	GDScriptCompiler::set_code_generator_factory(grit_create_code_generator);
 #else
