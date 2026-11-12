@@ -2391,6 +2391,7 @@ LightmapperRD::BakeError LightmapperRD::bake(BakeQuality p_quality, bool p_use_d
 		bs.attachments.write[0].src_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
 		bs.attachments.write[0].dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
 		BitField<RD::PipelineDynamicStateFlags> blend_dynamic_state;
+		blend_dynamic_state.clear();
 		if (direct_visibility_output) {
 			// Visibility is data, so blend it with the same weight as irradiance.
 			bs.attachments.write[0].src_color_blend_factor = RD::BLEND_FACTOR_CONSTANT_ALPHA;
