@@ -70,7 +70,10 @@ jobs:
         run: |
           status=0
           for project in flappy benchmark; do
-            timeout 600 ./bin/godot.linuxbsd.template_release.x86_64.$project --headless --main-pack "build/$project.pck" 2>&1 | tee build/native_$project.txt
+            binary=./bin/godot.linuxbsd.template_release.x86_64.$project
+            # A template loads the pack that sits next to it with the same base name.
+            cp "build/$project.pck" "$binary.pck"
+            timeout 600 $binary --headless 2>&1 | tee build/native_$project.txt
             test "${PIPESTATUS[0]}" = 0 || status=1
             # Results must match exactly, timings are expected to differ.
             grep '^result' build/vm_$project.txt > build/vm_$project.results
