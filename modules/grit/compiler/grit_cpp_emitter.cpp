@@ -2613,8 +2613,8 @@ String GritCppEmitter::registration_symbol(const String &p_script_path) {
 
 String GritCppEmitter::emit_script_file(const String &p_script_path, const LocalVector<GritFunction> &p_functions, bool p_obfuscate) {
 	StringBuilder file;
-	file.append("#include \"grit/runtime/grit_registry.h\"\n");
-	file.append("#include \"grit/runtime/grit_runtime.h\"\n\n");
+	file.append("#include \"modules/grit/runtime/grit_registry.h\"\n");
+	file.append("#include \"modules/grit/runtime/grit_runtime.h\"\n\n");
 	file.append("#include \"core/object/class_db.h\"\n");
 	file.append("#include \"core/variant/variant_construct.h\"\n");
 	file.append("#include \"core/variant/variant_op.h\"\n");
@@ -2666,7 +2666,7 @@ String GritCppEmitter::emit_script_file(const String &p_script_path, const Local
 
 String GritCppEmitter::emit_registry_file(const String &p_fingerprint, const Vector<String> &p_script_paths, bool p_obfuscate) {
 	StringBuilder file;
-	file.append("#include \"grit/runtime/grit_registry.h\"\n\n");
+	file.append("#include \"modules/grit/runtime/grit_registry.h\"\n\n");
 	for (const String &script_path : p_script_paths) {
 		file.append("void " + registration_symbol(script_path) + "(GritRegistry &r_registry);\n");
 	}
