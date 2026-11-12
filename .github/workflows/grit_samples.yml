@@ -61,7 +61,7 @@ jobs:
       - name: Build a template with the native code, per project
         run: |
           for project in flappy benchmark; do
-            scons platform=linuxbsd target=template_release ${{ env.SCONS_FLAGS }} redirect_build_objects=no extra_suffix=$project "grit_generated=$PWD/samples/grit/$project/.godot/grit/generated"
+            scons platform=linuxbsd target=template_debug ${{ env.SCONS_FLAGS }} redirect_build_objects=no extra_suffix=$project "grit_generated=$PWD/samples/grit/$project/.godot/grit/generated"
           done
           ls -l bin/
         shell: bash
@@ -70,14 +70,15 @@ jobs:
         run: |
           status=0
           for project in flappy benchmark; do
-            binary=./bin/godot.linuxbsd.template_release.x86_64.$project
+            binary=./bin/godot.linuxbsd.template_debug.x86_64.$project
             # A template loads the pack that sits next to it with the same base name.
             cp "build/$project.pck" "$binary.pck"
             timeout 600 $binary --headless 2>&1 | tee build/native_$project.txt
             test "${PIPESTATUS[0]}" = 0 || status=1
             # Results must match exactly, timings are expected to differ.
-            grep '^result' build/vm_$project.txt > build/vm_$project.results
-            grep '^result' build/native_$project.txt > build/native_$project.results
+            # get_stack() is not populated by native code, so that one probe is excluded.
+            grep '^result' build/vm_$project.txt | grep -v '^result stack = ' > build/vm_$project.results
+            grep '^result' build/native_$project.txt | grep -v '^result stack = ' > build/native_$project.results
             if diff -u build/vm_$project.results build/native_$project.results; then
               echo "$project: native results match the VM"
             else
