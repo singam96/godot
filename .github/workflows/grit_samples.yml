@@ -61,7 +61,7 @@ jobs:
       - name: Build a template with the native code, per project
         run: |
           for project in flappy benchmark; do
-            scons platform=linuxbsd target=template_release ${{ env.SCONS_FLAGS }} redirect_build_objects=no extra_suffix=$project "grit_generated=samples/grit/$project/.godot/grit/generated"
+            scons platform=linuxbsd target=template_release ${{ env.SCONS_FLAGS }} redirect_build_objects=no extra_suffix=$project "grit_generated=$PWD/samples/grit/$project/.godot/grit/generated"
           done
           ls -l bin/
         shell: bash

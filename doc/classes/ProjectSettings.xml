@@ -1243,10 +1243,6 @@
 			Override for [member filesystem/import/fbx2gltf/enabled] on the Web where FBX2glTF can't easily be accessed from Godot.
 		</member>
 		<member name="grit/export/enabled" type="bool" setter="" getter="" default="true">
-		</member>
-		<member name="grit/export/generated_directory" type="String" setter="" getter="" default="&quot;res://.godot/grit/generated&quot;">
-		</member>
-		<member name="grit/export/enabled" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the Grit module generates native C++ code for the project's GDScript when exporting. The code is written to [member grit/export/generated_directory] and has to be compiled into a custom export template.
 		</member>
 		<member name="grit/export/generated_directory" type="String" setter="" getter="" default="&quot;res://.godot/grit/generated&quot;">
