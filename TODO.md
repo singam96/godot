@@ -9,16 +9,15 @@ CI runs: dispatch `linux_builds.yml` with `gh workflow run linux_builds.yml -R s
 - [x] Push `shelter-engine-dev` to origin
 - [x] Fix strict-warning errors in `scene/3d/lightmap_gi.cpp` (shadowed `layers`, unhandled `CULL_MAX`)
 
-## In progress
-- [ ] CI run 43086956536 on `shelter-engine-dev` (after the LightmapGI fix): fix whatever else fails
-- [ ] Integrate Grit (https://github.com/singam96/grit) on branch `grit-integration`
-  - [x] Copy `modules/grit` (plus its MIT LICENSE) into `modules/grit`
-  - [x] Apply `patches/4.7.2-stable/0001-gdscript-native-call-hooks.patch` (5 hunks by `git apply`, 2 ported by hand for 4.8: native-call dispatch in `gdscript_vm.cpp`, friend in `GDScriptFunctionState`)
-  - [ ] Get the engine compiling with the module on 4.8 (Grit targets 4.7.2; expect API drift)
-  - [ ] Run Grit's module tests (`modules/grit/tests`) in CI
-  - [ ] Merge `grit-integration` into `shelter-engine-dev` once green
+## Grit integration (done)
+- [x] Copy `modules/grit` (plus its MIT LICENSE), apply the native-call engine patch (two hunks ported by hand for 4.8)
+- [x] Port the module to Godot 4.8 API changes; Linux Builds green (editor, unit tests, doc check, sanitizers, Mono)
+- [x] Module tests run in CI
+- [x] Sample projects in `samples/grit` (flappy, benchmark); `Grit Samples` workflow builds the editor, runs each in the VM, exports (generates C++), builds a template with the native code, runs it and diffs the results: green
+- [x] Merge `grit-integration` into `shelter-engine-dev`, then both into `master`
 
 ## Notes
 - Grit's `tools/grit.py` workflow assumes a separate 4.7.2 checkout. Here the module lives in-tree, so builds are plain `scons` with the module enabled; `tools/` is not imported.
 - Local machine has no `scons` or X11/audio dev libraries, so all compile checks go through GitHub Actions.
+- `get_stack()` is not populated by native code; the sample comparison skips that probe. Native vs VM is compared against a debug template (release templates differ on `is_debug_build()` paths).
 - Not yet verified by eye: shadow/MultiMesh/texture-budget rendering changes. Needs a scene run.
