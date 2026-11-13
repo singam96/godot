@@ -568,4 +568,3 @@ func _fail_streaming(message: String) -> void:
 		_failure_reported = true
 	_stream_state = StreamState.FAILED
 	_retry_at_msec = Time.get_ticks_msec() + RETRY_DELAY_MSEC
-
