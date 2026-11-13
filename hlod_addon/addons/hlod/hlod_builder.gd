@@ -4,12 +4,15 @@ extends RefCounted
 ##
 ## Generating a proxy is split in three parts: [method prepare] reads the scene and the rendering server on the
 ## calling thread, [method run] only works on the gathered data and can run on a thread of its own, and
-## [method build_mesh] creates the mesh, textures and materials again on the calling thread. The thread must not
+## [method build_mesh] creates the mesh, textures and materials again on the calling thread. Builders that share an
+## [member atlas_context] (the cells of a grid) call [method gather] and [method merge_meshes] themselves instead of
+## [method prepare], with the context planned in between. The thread must not
 ## call into the scene or the rendering server, because with the default threading model such calls block until
 ## the main thread flushes the server.
 
 const HLODTools := preload("hlod_tools.gd")
 const HLODAtlas := preload("hlod_atlas.gd")
+const HLODAtlasContext := preload("hlod_atlas_context.gd")
 
 enum Stage { ATLAS, MERGE, HIDDEN_FACES, SIMPLIFY, MESH, DONE }
 ## Where every stage starts in the progress (per mille).
@@ -21,6 +24,16 @@ var simplify_ratio := 0.25
 var merge_materials := true
 var remove_hidden_faces := true
 var atlas_cell_size := 128
+var compress_atlas := false
+## The hidden face test is skipped when there are more opaque triangles than this.
+var hidden_face_triangle_limit := 200000
+## The atlases of this builder. A shared context makes several builders use the same atlases; if it is not set, the
+## builder makes one of its own.
+var atlas_context: RefCounted
+
+## What the merged meshes did, for the proxy to copy: whether any of them cast shadows and the union of their layers.
+var proxy_cast_shadow := GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+var proxy_layers := 1
 
 ## The outcome of [method run]: OK, ERR_SKIP if it was cancelled or ERR_DOES_NOT_EXIST if there was nothing to merge.
 var error := OK
@@ -32,10 +45,10 @@ var _cancel := false
 var _done := false
 
 var _sources: Array[Dictionary] = []  # {mesh, surface, arrays}
-var _entries: Array[Dictionary] = []  # {source, xform, material, group, slot}
-var _albedo_images := {}  # Material -> Image (or null)
-var _groups: Array[Dictionary] = []  # {key, materials, images, layout, atlas_image}
+var _entries: Array[Dictionary] = []  # {source, xform, material, key, group, slot}
 var _batches: Array[Dictionary] = []  # {material, group, arrays}
+var _batch_lookup := {}  # batch key -> index into _batches
+var _warned_multimesh := false
 var _results: Array[Dictionary] = []  # {arrays, material, group}
 
 # State of the hidden face test.
@@ -99,7 +112,24 @@ func _finish(result: Error) -> void:
 
 ## Reads everything that is needed from the cluster, the scene and the rendering server, and merges the meshes.
 func prepare(cluster: Node3D) -> Error:
+	var err := gather(cluster)
+	if err != OK:
+		return err
+	atlas_context.plan()
+	merge_meshes()
+	return OK
+
+
+## Reads the meshes of the cluster and registers the materials that go into an atlas. Returns ERR_DOES_NOT_EXIST if
+## there is nothing to merge.
+func gather(cluster: Node3D) -> Error:
+	if atlas_context == null:
+		atlas_context = HLODAtlasContext.new()
+		atlas_context.cell_size = atlas_cell_size
+		atlas_context.compress = compress_atlas
 	var source_lookup := {}
+	var casts_shadow := false
+	var layers := 0
 	for instance: GeometryInstance3D in cluster.collect_mergeable_geometry():
 		var base: Variant = HLODTools.relative_transform(instance, cluster)
 		if base == null:
@@ -112,10 +142,16 @@ func prepare(cluster: Node3D) -> Error:
 			mesh = mesh_instance.mesh
 			xforms.append(base)
 		else:
+			var multimesh_instance := instance as MultiMeshInstance3D
+			if multimesh_instance == null:
+				continue
 			# Every instance of a MultiMesh (e.g. foliage) is merged in as its own copy of the mesh.
-			var multimesh: MultiMesh = (instance as MultiMeshInstance3D).multimesh
+			var multimesh: MultiMesh = multimesh_instance.multimesh
 			if multimesh == null or multimesh.transform_format != MultiMesh.TRANSFORM_3D:
 				continue
+			if (multimesh.use_colors or multimesh.use_custom_data) and not _warned_multimesh:
+				_warned_multimesh = true
+				push_warning("HLOD: the per-instance colors and custom data of '%s' are not baked into the proxy." % multimesh_instance.name)
 			mesh = multimesh.mesh
 			var count := multimesh.instance_count
 			if multimesh.visible_instance_count >= 0:
@@ -125,6 +161,7 @@ func prepare(cluster: Node3D) -> Error:
 		if mesh == null:
 			continue
 
+		var added := false
 		for surface in mesh.get_surface_count():
 			# Primitive meshes (box, sphere, ...) are always triangles; only ArrayMesh can hold other types.
 			if mesh is ArrayMesh and mesh.surface_get_primitive_type(surface) != Mesh.PRIMITIVE_TRIANGLES:
@@ -138,19 +175,24 @@ func prepare(cluster: Node3D) -> Error:
 				source_lookup[key] = _sources.size()
 				_sources.append({"mesh": mesh, "surface": surface, "arrays": mesh.surface_get_arrays(surface)})
 			for xform in xforms:
-				_entries.append({"source": source_lookup[key], "xform": xform, "material": material, "group": -1, "slot": -1})
+				_entries.append({"source": source_lookup[key], "xform": xform, "material": material, "key": "", "group": -1, "slot": -1})
+			added = true
+		if added:
+			casts_shadow = casts_shadow or instance.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			layers |= instance.layers
 	if _entries.is_empty():
 		return ERR_DOES_NOT_EXIST
+	proxy_cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casts_shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	proxy_layers = layers if layers != 0 else 1
 
 	if merge_materials:
-		_plan_atlases()
-	_merge()
+		_register_materials()
 	return OK
 
 
-## Decides which materials are baked into which atlas, and where the UVs of every surface have to move to.
-func _plan_atlases() -> void:
-	var group_lookup := {}
+## Decides which materials can be baked into an atlas. Where the UVs of every surface have to move to is decided
+## once the context has planned the atlases, in [method merge_meshes].
+func _register_materials() -> void:
 	var uv_in_range := {}
 	for entry in _entries:
 		var material: StandardMaterial3D = entry.material as StandardMaterial3D
@@ -163,33 +205,19 @@ func _plan_atlases() -> void:
 		var has_uvs: bool = _sources[source_index].arrays[Mesh.ARRAY_TEX_UV] != null
 		if not uv_in_range[source_index] or (material.albedo_texture != null and not has_uvs):
 			continue
-		if not _albedo_images.has(material):
-			var albedo := HLODAtlas.read_albedo(material)
-			if not albedo[0]:
-				continue
-			_albedo_images[material] = albedo[1]
+		entry.key = atlas_context.register(material)
 
-		var key := HLODAtlas.group_key(material)
-		if not group_lookup.has(key):
-			group_lookup[key] = _groups.size()
-			_groups.append({"key": key, "materials": [], "images": [], "layout": {}, "atlas_image": null})
-		var group: Dictionary = _groups[group_lookup[key]]
-		var slot: int = group.materials.find(material)
-		if slot < 0:
-			group.materials.append(material)
-			group.images.append(_albedo_images[material])
-			slot = group.materials.size() - 1
-		entry.group = group_lookup[key]
-		entry.slot = slot
 
-	# A single material gains nothing from an atlas.
+## Merges the gathered meshes, with the UVs moved into the atlases of the (planned) context.
+func merge_meshes() -> void:
 	for entry in _entries:
-		if entry.group >= 0 and _groups[entry.group].materials.size() < 2:
-			entry.group = -1
-			entry.slot = -1
-	for group in _groups:
-		if group.materials.size() > 1:
-			group.layout = HLODAtlas.layout(group.materials.size(), atlas_cell_size)
+		if entry.key == "":
+			continue
+		var group: int = atlas_context.group_of(entry.key)
+		if atlas_context.is_atlased(group):
+			entry.group = group
+			entry.slot = atlas_context.slot_of(group, entry.material)
+	_merge()
 
 
 func _uvs_in_range(uvs: Variant) -> bool:
@@ -206,14 +234,11 @@ func _merge() -> void:
 	var tools: Array[SurfaceTool] = []
 	var remapped := {}
 	for entry in _entries:
-		var batch_index := -1
-		for i in _batches.size():
-			var batch: Dictionary = _batches[i]
-			if (entry.group >= 0 and batch.group == entry.group) or (entry.group < 0 and batch.group < 0 and batch.material == entry.material):
-				batch_index = i
-				break
+		var batch_key: String = "g%d" % entry.group if entry.group >= 0 else "m%d" % (entry.material.get_instance_id() if entry.material != null else 0)
+		var batch_index: int = _batch_lookup.get(batch_key, -1)
 		if batch_index < 0:
 			batch_index = _batches.size()
+			_batch_lookup[batch_key] = batch_index
 			_batches.append({"material": entry.material, "group": entry.group, "arrays": []})
 			var new_tool := SurfaceTool.new()
 			new_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -224,7 +249,7 @@ func _merge() -> void:
 			# The UVs of the surface move into the rectangle of its material. Without UVs (a solid color), the center is used.
 			var key := "%d:%d" % [entry.source, entry.slot]
 			if not remapped.has(key):
-				var rect: Rect2 = _groups[entry.group].layout.rects[entry.slot]
+				var rect: Rect2 = atlas_context.groups[entry.group].layout.rects[entry.slot]
 				var arrays: Array = source.arrays.duplicate()
 				var uvs: Variant = arrays[Mesh.ARRAY_TEX_UV]
 				if uvs == null:
@@ -251,13 +276,8 @@ func _merge() -> void:
 ## Does the heavy work on the gathered data. Safe to run on a thread.
 func run() -> void:
 	_set_progress(Stage.ATLAS)
-	for i in _groups.size():
-		var group: Dictionary = _groups[i]
-		if group.materials.size() > 1:
-			_set_progress(Stage.ATLAS, float(i) / _groups.size())
-			group.atlas_image = HLODAtlas.bake(group.materials, group.images, group.layout)
-		if _is_cancelled():
-			return _finish(ERR_SKIP)
+	if not atlas_context.bake(func(fraction: float) -> void: _set_progress(Stage.ATLAS, fraction), _is_cancelled):
+		return _finish(ERR_SKIP)
 
 	var arrays_list: Array = []
 	var occluders: Array[bool] = []
@@ -266,7 +286,7 @@ func run() -> void:
 		# Opaque surfaces hide what is behind them. Other shader types are unknown, so they are not assumed to be opaque.
 		var material: Material = batch.material
 		if batch.group >= 0:
-			material = _groups[batch.group].materials[0]
+			material = atlas_context.groups[batch.group].materials[0]
 		var base_material := material as BaseMaterial3D
 		occluders.append(material == null or (base_material != null and base_material.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED))
 
@@ -295,14 +315,10 @@ func run() -> void:
 
 ## Creates the mesh, the atlas textures and their materials. Uses the rendering server.
 func build_mesh() -> ArrayMesh:
-	var atlas_materials := {}
-	for i in _groups.size():
-		if _groups[i].atlas_image != null:
-			atlas_materials[i] = HLODAtlas.create_material(_groups[i].materials[0], _groups[i].atlas_image)
 	var mesh := ArrayMesh.new()
 	for result in _results:
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, result.arrays)
-		var material: Material = atlas_materials[result.group] if atlas_materials.has(result.group) else result.material
+		var material: Material = atlas_context.get_material(result.group) if result.group >= 0 else result.material
 		mesh.surface_set_material(mesh.get_surface_count() - 1, material)
 	return mesh
 
@@ -403,6 +419,10 @@ func _cull_hidden_faces(arrays_list: Array, occluders: Array[bool]) -> void:
 			face_triangle.append(t / 3)
 	if face_batch.is_empty():
 		return
+	if face_batch.size() > hidden_face_triangle_limit:
+		push_warning("HLOD: hidden face removal was skipped because there are %d opaque triangles (the limit is %d, see hidden_face_triangle_limit)." % [face_batch.size(), hidden_face_triangle_limit])
+		_faces = PackedVector3Array()
+		return
 
 	_tri_mesh = TriangleMesh.new()
 	if not _tri_mesh.create_from_faces(_faces):
@@ -492,4 +512,13 @@ func _is_face_visible(face: int) -> bool:
 		for axis in [Vector3.RIGHT, Vector3.LEFT, Vector3.UP, Vector3.DOWN, Vector3.BACK, Vector3.FORWARD]:
 			if _is_reached(corner, axis, face):
 				return true
+	# A large triangle can be covered at its center and corners and still show along an edge.
+	var edges := [
+		v0 * 0.4 + v1 * 0.4 + v2 * 0.2,
+		v1 * 0.4 + v2 * 0.4 + v0 * 0.2,
+		v2 * 0.4 + v0 * 0.4 + v1 * 0.2,
+	]
+	for edge: Vector3 in edges:
+		if _is_reached(edge, normal, face) or _is_reached(edge, -normal, face):
+			return true
 	return false

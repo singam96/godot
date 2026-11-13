@@ -16,8 +16,14 @@ extends Node3D
 
 const HLODBuilder := preload("hlod_builder.gd")
 const HLODTools := preload("hlod_tools.gd")
+const HLODAtlasContext := preload("hlod_atlas_context.gd")
 
 enum StreamState { UNLOADED, LOADING, LOADED, FAILED }
+
+## How long a failed load of the detail scene waits before it is tried again.
+const RETRY_DELAY_MSEC := 5000
+## Metadata set on the clusters that [method build_grid] creates, so that running it again can find them.
+const GRID_CELL_META := &"hlod_grid_cell"
 
 @export_group("Switching")
 ## The distance from the camera, in meters, at which the proxy replaces the descendants.
@@ -49,6 +55,22 @@ enum StreamState { UNLOADED, LOADING, LOADED, FAILED }
 @export_range(16, 2048, 1, "suffix:px") var atlas_cell_size := 128
 ## Drop the triangles that cannot be seen from outside, such as the walls inside of a building.
 @export var remove_hidden_faces := true
+## The hidden face test is skipped, with a warning, for clusters that have more opaque triangles than this, because
+## it casts dozens of rays per triangle.
+@export_range(1000, 10000000, 1000, "or_greater") var hidden_face_triangle_limit := 200000
+## Compress the texture atlas with the best format the renderer supports. This saves video memory, but the atlas
+## is only usable on platforms that support that format, so it is off by default.
+@export var compress_atlas := false
+## Whether the proxy casts shadows. [method generate_proxy] sets this to what the merged meshes did.
+@export var proxy_cast_shadow := GeometryInstance3D.SHADOW_CASTING_SETTING_ON:
+	set(value):
+		proxy_cast_shadow = value
+		_update_proxy()
+## The render layers of the proxy. [method generate_proxy] sets this to the layers of the merged meshes.
+@export_flags_3d_render var proxy_layers := 1:
+	set(value):
+		proxy_layers = value
+		_update_proxy()
 ## The simplified mesh drawn at a distance, in the local space of this node. Assign it manually or create it with [method generate_proxy].
 @export var proxy_mesh: Mesh:
 	set(value):
@@ -64,6 +86,7 @@ enum StreamState { UNLOADED, LOADING, LOADED, FAILED }
 	set(value):
 		detail_scene_path = value
 		_stream_state = StreamState.UNLOADED
+		_update_proxy()
 		if is_inside_tree():
 			set_process_internal(not detail_scene_path.is_empty() and not Engine.is_editor_hint())
 ## How far outside of [member switch_distance] (in meters) the camera must be before the detail scene starts loading.
@@ -78,6 +101,8 @@ var _relink_queued := false
 var _stream_state := StreamState.UNLOADED
 var _detail_id := 0
 var _stream_timer := 0.0
+var _retry_at_msec := 0
+var _failure_reported := false
 
 var _builder: RefCounted
 var _thread: Thread
@@ -122,13 +147,20 @@ func _update_proxy() -> void:
 	if _proxy == null:
 		return
 	_proxy.mesh = proxy_mesh
-	_proxy.visibility_range_begin = switch_distance
-	_proxy.visibility_range_begin_margin = switch_margin
+	_proxy.cast_shadow = proxy_cast_shadow
+	_proxy.layers = proxy_layers
+	# While the detailed geometry is streamed out, the proxy is all there is, so it is drawn at every distance. This
+	# also covers the time the detail scene needs to load.
+	var detail_missing := not detail_scene_path.is_empty() and _stream_state != StreamState.LOADED and get_child_count() == 0
+	_proxy.visibility_range_begin = 0.0 if detail_missing else switch_distance
+	_proxy.visibility_range_begin_margin = 0.0 if detail_missing else switch_margin
 	_proxy.visibility_range_fade_mode = fade_mode as GeometryInstance3D.VisibilityRangeFadeMode
 
 
-## Gathers the geometry that belongs to this cluster. Nested clusters manage their own geometry: their proxies are
-## added to [param nested_proxies] if given, and their geometry is only reported when [param descend_nested] is set.
+## Gathers the geometry that belongs to this cluster. Only [MeshInstance3D] and [MultiMeshInstance3D] nodes are
+## reported, because those are the ones that are merged; other kinds of geometry (sprites, labels, particles, CSG) are
+## left alone. Nested clusters manage their own geometry: their proxies are added to [param nested_proxies] if given,
+## and their geometry is only reported when [param descend_nested] is set.
 func _collect_geometry(node: Node, geometry: Array, nested_proxies: Array, descend_nested: bool) -> void:
 	for child in node.get_children():
 		if child is HLODCluster:
@@ -136,7 +168,7 @@ func _collect_geometry(node: Node, geometry: Array, nested_proxies: Array, desce
 			if descend_nested:
 				_collect_geometry(child, geometry, nested_proxies, descend_nested)
 			continue
-		if child is GeometryInstance3D:
+		if child is MeshInstance3D or child is MultiMeshInstance3D:
 			geometry.append(child)
 		_collect_geometry(child, geometry, nested_proxies, descend_nested)
 
@@ -210,15 +242,29 @@ func generate_proxy_async() -> Error:
 	return _start_generation(true)
 
 
-func _start_generation(threaded: bool) -> Error:
-	if _builder != null:
-		return ERR_BUSY
+func _make_builder() -> RefCounted:
 	var builder := HLODBuilder.new()
 	builder.simplify_ratio = simplify_ratio
 	builder.merge_materials = merge_materials
 	builder.remove_hidden_faces = remove_hidden_faces
+	builder.hidden_face_triangle_limit = hidden_face_triangle_limit
 	builder.atlas_cell_size = atlas_cell_size
-	var err := builder.prepare(self)
+	builder.compress_atlas = compress_atlas
+	return builder
+
+
+## Takes over the result of a finished builder.
+func _apply_builder(builder: RefCounted) -> void:
+	proxy_cast_shadow = builder.proxy_cast_shadow
+	proxy_layers = builder.proxy_layers
+	proxy_mesh = builder.build_mesh()
+
+
+func _start_generation(threaded: bool) -> Error:
+	if _builder != null:
+		return ERR_BUSY
+	var builder := _make_builder()
+	var err: Error = builder.prepare(self)
 	if err != OK:
 		return err
 	_builder = builder
@@ -276,7 +322,7 @@ func finish_generation() -> Error:
 	_builder = null
 	if builder.error != OK:
 		return builder.error
-	proxy_mesh = builder.build_mesh()
+	_apply_builder(builder)
 	return OK
 
 
@@ -294,11 +340,15 @@ func _abort_generation() -> void:
 ## Builds a hierarchy of detail levels for a large number of objects. The direct [Node3D] children are sorted into a
 ## grid with cells of [param cell_size] meters and moved into one nested [HLODCluster] per occupied cell, keeping
 ## their place. Each cell uses half of this cluster's [member switch_distance] and [member switch_margin] and the
-## same settings. A proxy is then generated for every cell and for this cluster. This changes the node tree and
+## same settings. A proxy is then generated for every cell and for this cluster. All of them share one texture atlas
+## per kind of material, so the atlases are not baked and stored once per cell. Cells that have nothing to merge
+## (only markers, lights, hidden nodes) are not created, and their nodes stay where they were. Cells made by an
+## earlier call are taken apart first, so calling this again does not nest the cells. This changes the node tree and
 ## can't be undone with the editor's undo history. Choose a [param cell_size] smaller than [member switch_distance].
 func build_grid(cell_size: float) -> Error:
 	if cell_size <= 0.0:
 		return ERR_INVALID_PARAMETER
+	_dissolve_grid_cells()
 	var cells := {}
 	var cell_order: Array[Vector3i] = []
 	for child in get_children():
@@ -318,10 +368,15 @@ func build_grid(cell_size: float) -> Error:
 	if scene_owner == null and (get_parent() == null or (is_inside_tree() and get_tree().edited_scene_root == self)):
 		scene_owner = self
 
+	var atlas_context := HLODAtlasContext.new()
+	atlas_context.cell_size = atlas_cell_size
+	atlas_context.compress = compress_atlas
+	var pending: Array[Dictionary] = []  # {cluster, builder}
 	for cell in cell_order:
 		var center := (Vector3(cell) + Vector3(0.5, 0.5, 0.5)) * cell_size
 		var cell_cluster := HLODCluster.new()
 		cell_cluster.name = "Cell_%d_%d_%d" % [cell.x, cell.y, cell.z]
+		cell_cluster.set_meta(GRID_CELL_META, true)
 		cell_cluster.switch_distance = switch_distance * 0.5
 		cell_cluster.switch_margin = switch_margin * 0.5
 		cell_cluster.fade_mode = fade_mode
@@ -329,21 +384,70 @@ func build_grid(cell_size: float) -> Error:
 		cell_cluster.merge_materials = merge_materials
 		cell_cluster.atlas_cell_size = atlas_cell_size
 		cell_cluster.remove_hidden_faces = remove_hidden_faces
+		cell_cluster.hidden_face_triangle_limit = hidden_face_triangle_limit
+		cell_cluster.compress_atlas = compress_atlas
 		cell_cluster.position = center
 		add_child(cell_cluster, true)
 		if scene_owner != null:
 			cell_cluster.owner = scene_owner
 
 		# The cell is a pure translation, so the objects keep their place by subtracting its offset.
+		var original_positions := {}
 		for child_3d: Node3D in cells[cell]:
 			var position := child_3d.position
+			original_positions[child_3d] = position
 			HLODTools.move_node_keeping_owner(child_3d, cell_cluster)
 			child_3d.position = position - center
 
-		var err := cell_cluster.generate_proxy()
+		var builder := cell_cluster._make_builder()
+		builder.atlas_context = atlas_context
+		var err: Error = builder.gather(cell_cluster)
+		if err == ERR_DOES_NOT_EXIST:
+			# Nothing to merge here: put the nodes back and drop the cell.
+			for child_3d: Node3D in cells[cell]:
+				HLODTools.move_node_keeping_owner(child_3d, self)
+				child_3d.position = original_positions[child_3d]
+			remove_child(cell_cluster)
+			cell_cluster.free()
+			continue
 		if err != OK:
 			return err
-	return generate_proxy()
+		pending.append({"cluster": cell_cluster, "builder": builder})
+
+	var own_builder := _make_builder()
+	own_builder.atlas_context = atlas_context
+	var own_error: Error = own_builder.gather(self)
+	if own_error != OK:
+		return own_error
+	pending.append({"cluster": self, "builder": own_builder})
+
+	atlas_context.plan()
+	for entry in pending:
+		var builder: RefCounted = entry.builder
+		builder.merge_meshes()
+		builder.run()
+		if builder.error == ERR_DOES_NOT_EXIST and entry.cluster != self:
+			continue  # Everything in this cell was hidden, so it has no proxy.
+		if builder.error != OK:
+			return builder.error
+		entry.cluster._apply_builder(builder)
+	return OK
+
+
+## Moves the contents of the cells made by [method build_grid] back below this cluster and removes the cells.
+func _dissolve_grid_cells() -> void:
+	for child in get_children():
+		var cell_cluster := child as HLODCluster
+		if cell_cluster == null or not cell_cluster.has_meta(GRID_CELL_META):
+			continue
+		for grandchild in cell_cluster.get_children():
+			var grandchild_3d := grandchild as Node3D
+			var position := grandchild_3d.position if grandchild_3d != null else Vector3.ZERO
+			HLODTools.move_node_keeping_owner(grandchild, self)
+			if grandchild_3d != null:
+				grandchild_3d.position = position + cell_cluster.position
+		remove_child(cell_cluster)
+		cell_cluster.free()
 
 
 ## Moves the children of this cluster into a new scene saved at [param path] and sets [member detail_scene_path]
@@ -364,18 +468,23 @@ func store_detail_scene(path: String) -> Error:
 	var moved: Array[Dictionary] = []
 	for child in get_children():
 		var owned: Array[Node] = []
+		var previous_owners := {}
 		var to_visit: Array[Node] = [child]
 		while not to_visit.is_empty():
 			var current: Node = to_visit.pop_back()
 			if current == child or current.owner == scene_owner or current.owner == null:
 				owned.append(current)
+				previous_owners[current] = current.owner
 			for grandchild in current.get_children():
 				to_visit.append(grandchild)
+		# Owners are cleared while the nodes move, because owners that are not parents raise a warning.
+		for node in owned:
+			node.owner = null
 		remove_child(child)
 		holder.add_child(child)
 		for node in owned:
 			node.owner = holder
-		moved.append({"node": child, "owned": owned})
+		moved.append({"node": child, "owned": owned, "owners": previous_owners})
 
 	var packed := PackedScene.new()
 	var err := packed.pack(holder)
@@ -384,10 +493,12 @@ func store_detail_scene(path: String) -> Error:
 	if err != OK:
 		# Put everything back where it was.
 		for entry in moved:
+			for node: Node in entry.owned:
+				node.owner = null
 			holder.remove_child(entry.node)
 			add_child(entry.node)
 			for node: Node in entry.owned:
-				node.owner = null if scene_owner == self else scene_owner
+				node.owner = entry.owners[node]
 		holder.free()
 		return err
 
@@ -413,8 +524,7 @@ func update_streaming() -> void:
 				if ResourceLoader.load_threaded_request(detail_scene_path, "PackedScene") == OK:
 					_stream_state = StreamState.LOADING
 				else:
-					push_error("HLODCluster could not start loading the detail scene '%s'." % detail_scene_path)
-					_stream_state = StreamState.FAILED
+					_fail_streaming("HLODCluster could not start loading the detail scene '%s'." % detail_scene_path)
 		StreamState.LOADING:
 			var status := ResourceLoader.load_threaded_get_status(detail_scene_path)
 			if status == ResourceLoader.THREAD_LOAD_LOADED:
@@ -424,16 +534,38 @@ func update_streaming() -> void:
 					add_child(detail)
 					_detail_id = detail.get_instance_id()
 					_stream_state = StreamState.LOADED
+					_failure_reported = false
+					# The detail geometry follows the proxy right away, and the proxy goes back to its range.
+					update_children()
+					_update_proxy()
 				else:
-					push_error("HLODCluster could not instantiate the detail scene '%s'." % detail_scene_path)
-					_stream_state = StreamState.FAILED
+					_fail_streaming("HLODCluster could not instantiate the detail scene '%s'." % detail_scene_path)
 			elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
-				push_error("HLODCluster failed to load the detail scene '%s'." % detail_scene_path)
-				_stream_state = StreamState.FAILED
+				_fail_streaming("HLODCluster failed to load the detail scene '%s'." % detail_scene_path)
 		StreamState.LOADED:
 			if distance > detail_distance + stream_unload_margin:
 				var detail := instance_from_id(_detail_id) as Node
 				if detail != null:
+					remove_child(detail)
 					detail.queue_free()
 				_detail_id = 0
 				_stream_state = StreamState.UNLOADED
+				# The detail geometry is gone, so the proxy covers every distance again.
+				_update_proxy()
+		StreamState.FAILED:
+			if Time.get_ticks_msec() >= _retry_at_msec:
+				# The loader keeps the failed request until its result is taken, and would answer a new request with it.
+				if ResourceLoader.load_threaded_get_status(detail_scene_path) != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+					ResourceLoader.load_threaded_get(detail_scene_path)
+				_stream_state = StreamState.UNLOADED
+
+
+## A failed load is reported once and tried again after [constant RETRY_DELAY_MSEC], because the file may have
+## been missing only for a moment (for example while it is being rewritten).
+func _fail_streaming(message: String) -> void:
+	if not _failure_reported:
+		push_error(message)
+		_failure_reported = true
+	_stream_state = StreamState.FAILED
+	_retry_at_msec = Time.get_ticks_msec() + RETRY_DELAY_MSEC
+

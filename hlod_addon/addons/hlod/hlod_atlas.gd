@@ -2,8 +2,16 @@
 extends RefCounted
 ## Bakes groups of simple materials into one texture atlas.
 
-## Texels of edge padding around every texture in the atlas, to limit bleeding between neighbors.
-const PADDING := 2
+## The smallest number of texels of edge padding around every texture in the atlas.
+const MIN_PADDING := 2
+## The largest number of texels of edge padding.
+const MAX_PADDING := 16
+
+
+## Texels of edge padding around every texture in the atlas. A mipmap level halves the size of the texels, so a tile
+## needs padding that grows with its size to keep neighbors apart at the distances where the proxy is seen.
+static func padding_for(cell: int) -> int:
+	return clampi(cell / 16, MIN_PADDING, MAX_PADDING)
 
 
 ## Returns whether the material only uses features that survive being baked into an atlas: an opaque
@@ -60,12 +68,13 @@ static func layout(count: int, cell_size: int) -> Dictionary:
 	while cell > 16 and (columns * cell > 8192 or rows * cell > 8192):
 		cell /= 2
 	var size := Vector2(columns * cell, rows * cell)
-	var inner := cell - 2 * PADDING
+	var padding := padding_for(cell)
+	var inner := cell - 2 * padding
 	var rects: Array[Rect2] = []
 	for i in count:
-		var origin := Vector2((i % columns) * cell + PADDING, (i / columns) * cell + PADDING)
+		var origin := Vector2((i % columns) * cell + padding, (i / columns) * cell + padding)
 		rects.append(Rect2(origin / size, Vector2(inner, inner) / size))
-	return {"cell": cell, "columns": columns, "rows": rows, "rects": rects}
+	return {"cell": cell, "columns": columns, "rows": rows, "rects": rects, "padding": padding}
 
 
 ## Bakes the atlas image. [param images] holds the prepared albedo image of every material (null for materials
@@ -73,7 +82,8 @@ static func layout(count: int, cell_size: int) -> Dictionary:
 static func bake(materials: Array, images: Array, atlas_layout: Dictionary) -> Image:
 	var cell: int = atlas_layout.cell
 	var columns: int = atlas_layout.columns
-	var inner := cell - 2 * PADDING
+	var padding: int = atlas_layout.padding
+	var inner := cell - 2 * padding
 	var atlas := Image.create(columns * cell, int(atlas_layout.rows) * cell, false, Image.FORMAT_RGBA8)
 	for i in materials.size():
 		var tint: Color = materials[i].albedo_color
@@ -93,15 +103,15 @@ static func bake(materials: Array, images: Array, atlas_layout: Dictionary) -> I
 						var c := source.get_pixel(x, y)
 						var lc := c.srgb_to_linear()
 						source.set_pixel(x, y, Color(lc.r * linear_tint.r, lc.g * linear_tint.g, lc.b * linear_tint.b, 1.0).linear_to_srgb())
-			tile.blit_rect(source, Rect2i(0, 0, inner, inner), Vector2i(PADDING, PADDING))
+			tile.blit_rect(source, Rect2i(0, 0, inner, inner), Vector2i(padding, padding))
 			# Replicate the border texels into the padding.
-			for p in PADDING:
-				tile.blit_rect(source, Rect2i(0, 0, 1, inner), Vector2i(p, PADDING))
-				tile.blit_rect(source, Rect2i(inner - 1, 0, 1, inner), Vector2i(PADDING + inner + p, PADDING))
+			for p in padding:
+				tile.blit_rect(source, Rect2i(0, 0, 1, inner), Vector2i(p, padding))
+				tile.blit_rect(source, Rect2i(inner - 1, 0, 1, inner), Vector2i(padding + inner + p, padding))
 			var copy := tile.duplicate() as Image
-			for p in PADDING:
-				tile.blit_rect(copy, Rect2i(0, PADDING, cell, 1), Vector2i(0, p))
-				tile.blit_rect(copy, Rect2i(0, PADDING + inner - 1, cell, 1), Vector2i(0, PADDING + inner + p))
+			for p in padding:
+				tile.blit_rect(copy, Rect2i(0, padding, cell, 1), Vector2i(0, p))
+				tile.blit_rect(copy, Rect2i(0, padding + inner - 1, cell, 1), Vector2i(0, padding + inner + p))
 		atlas.blit_rect(tile, Rect2i(0, 0, cell, cell), Vector2i((i % columns) * cell, (i / columns) * cell))
 	atlas.generate_mipmaps()
 	return atlas
@@ -113,3 +123,26 @@ static func create_material(template: StandardMaterial3D, atlas: Image) -> Stand
 	result.albedo_color = Color.WHITE
 	result.albedo_texture = ImageTexture.create_from_image(atlas)
 	return result
+
+
+## Returns the compression mode the renderer can use for a desktop or mobile GPU, or -1 if it supports none.
+## Needs the rendering server, so call it from the main thread.
+static func pick_compression() -> int:
+	if RenderingServer.has_os_feature("s3tc"):
+		return Image.COMPRESS_S3TC
+	if RenderingServer.has_os_feature("etc2"):
+		return Image.COMPRESS_ETC2
+	if RenderingServer.has_os_feature("astc"):
+		return Image.COMPRESS_ASTC
+	return -1
+
+
+## Returns a compressed copy of [param image] (with its mipmaps), or the image itself if it can't be compressed.
+## Only does CPU work, so it is safe to call from a thread.
+static func compress_image(image: Image, mode: int) -> Image:
+	if mode < 0 or image == null:
+		return image
+	var copy := image.duplicate() as Image
+	if copy.compress(mode as Image.CompressMode, Image.COMPRESS_SOURCE_SRGB) != OK:
+		return image
+	return copy
